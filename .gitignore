@@ -10,12 +10,21 @@ Thumbs.db
 
 # Local app/runtime data
 **/.appdata/
+**/.dotnet/
 
 # Generated/temp files
 *.user
 *.suo
 *.log
+tmp-*
+**/net6.0/
 
 # Node/editor temp
 **/_tof_stage/
 **/_monorepo_stage/
+
+# Local tooling
+**/AGENTS.md
+**/.codex/
+**/.claude/
+**/.aider*
