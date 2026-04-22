@@ -1,0 +1,21 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build output
+**/bin/
+**/obj/
+
+# Local app/runtime data
+**/.appdata/
+
+# Generated/temp files
+*.user
+*.suo
+*.log
+
+# Node/editor temp
+**/_tof_stage/
+**/_monorepo_stage/

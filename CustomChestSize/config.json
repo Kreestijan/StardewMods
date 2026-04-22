@@ -1,0 +1,18 @@
+{
+  "RegularChestColumns": 16,
+  "RegularChestRows": 7,
+  "BigChestColumns": 24,
+  "BigChestRows": 12,
+  "ChestBackgroundHeightOffset": 0,
+  "InventoryPanelGapOffset": -12,
+  "InventoryBackgroundTopOffset": 28,
+  "InventoryBackgroundBottomOffset": 0,
+  "ChestsAnywhereWidgetXOffset": 0,
+  "ChestsAnywhereWidgetYOffset": 28,
+  "ColorPickerXOffset": 328,
+  "ColorPickerYOffset": 48,
+  "UnlimitedStorageSearchXOffset": 200,
+  "UnlimitedStorageSearchYOffset": -16,
+  "UnlimitedStorageSearchLeftOffset": -112,
+  "UnlimitedStorageSearchRightOffset": -160
+}

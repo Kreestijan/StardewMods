@@ -1,0 +1,12 @@
+{
+  "RegularChestColumns": 12,
+  "RegularChestRows": 3,
+  "BigChestColumns": 14,
+  "BigChestRows": 5,
+  "ChestBackgroundHeightOffset": 0,
+  "InventoryPanelGapOffset": -12,
+  "InventoryBackgroundTopOffset": 28,
+  "InventoryBackgroundBottomOffset": 0,
+  "ChestsAnywhereWidgetXOffset": 0,
+  "ChestsAnywhereWidgetYOffset": 28
+}

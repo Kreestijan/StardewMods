@@ -1,0 +1,15 @@
+{
+  "Name": "Pet While Sleeping",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Lets you pet sleeping barn and coop animals so you can still gain friendship at night.",
+  "UniqueID": "Kree.PetWhileSleeping",
+  "EntryDll": "PetWhileSleeping.dll",
+  "MinimumApiVersion": "4.0.0",
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
+}

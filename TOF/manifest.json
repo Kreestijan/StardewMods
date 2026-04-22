@@ -1,0 +1,16 @@
+{
+  "Name": "TOF",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "A Content Patcher pack that adds a fresh batch of catchable fish.",
+  "UniqueID": "Kree.TOF",
+  "MinimumApiVersion": "4.0.0",
+  "ContentPackFor": {
+    "UniqueID": "Pathoschild.ContentPatcher"
+  },
+  "Dependencies": [
+    {
+      "UniqueID": "Platonymous.ScaleUp"
+    }
+  ]
+}
