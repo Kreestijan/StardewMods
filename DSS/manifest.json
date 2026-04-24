@@ -1,0 +1,17 @@
+{
+  "Name": "Double Size Sprite",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Lets Content Patcher packs register double-resolution item atlases that still render at vanilla icon size.",
+  "UniqueID": "Kree.DSS",
+  "EntryDll": "DSS.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": [
+    "Nexus:YOUR_MOD_ID"
+  ],
+  "Dependencies": [
+    {
+      "UniqueID": "Pathoschild.ContentPatcher"
+    }
+  ]
+}

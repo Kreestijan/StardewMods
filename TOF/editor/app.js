@@ -18,7 +18,6 @@ const ObjectSpriteAtlasTileHeight = 32;
 const AquariumSpriteAtlasTileWidth = 24;
 const AquariumSpriteAtlasTileHeight = 48;
 const AquariumAtlasColumns = 12;
-const ScaleUpObjectScale = 2;
 const commonContextTags = [
   "alcohol_item",
   "algae_item",
@@ -2863,7 +2862,7 @@ function generatePackFiles(source) {
     },
     Dependencies: [
       {
-        UniqueID: "Platonymous.ScaleUp"
+        UniqueID: "Kree.DSS"
       }
     ]
   };
@@ -2882,12 +2881,13 @@ function generatePackFiles(source) {
       },
       {
         Action: "EditData",
-        Target: "{{Platonymous.ScaleUp/Assets}}",
+        Target: "{{Kree.DSS/Assets}}",
         Entries: {
-          [`${source.uniqueId}_Objects`]: {
-            Asset: source.objectsTextureTarget,
-            Scale: ScaleUpObjectScale
-          }
+          [`${source.uniqueId}_Objects`]: [
+            {
+              Asset: source.objectsTextureTarget
+            }
+          ]
         }
       }
     ]

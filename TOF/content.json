@@ -23,12 +23,13 @@
     },
     {
       "Action": "EditData",
-      "Target": "{{Platonymous.ScaleUp/Assets}}",
+      "Target": "{{Kree.DSS/Assets}}",
       "Entries": {
-        "Kree.TOF_Objects": {
-          "Asset": "Mods/Kree.TOF/Objects",
-          "Scale": 2
-        }
+        "Kree.TOF_Objects": [
+          {
+            "Asset": "Mods/Kree.TOF/Objects"
+          }
+        ]
       }
     },
     {

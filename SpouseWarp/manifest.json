@@ -1,0 +1,18 @@
+{
+  "Name": "Spouse Warp",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Adds an inventory widget that warps you to your spouse, other players, and selected NPCs.",
+  "UniqueID": "Kree.SpouseWarp",
+  "EntryDll": "SpouseWarp.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": [
+    "Nexus:YOUR_MOD_ID"
+  ],
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
+}

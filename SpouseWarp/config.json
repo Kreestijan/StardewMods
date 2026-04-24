@@ -1,0 +1,13 @@
+{
+  "RequiresMarriage": true,
+  "IgnoreLocationUnlocks": false,
+  "EnableSosButton": false,
+  "DebugHitboxes": false,
+  "WidgetScalePercent": 100,
+  "WarpCostGold": 500,
+  "CooldownSeconds": 5,
+  "WidgetOffsetX": 52,
+  "WidgetOffsetY": 0,
+  "ShowNPCs": {},
+  "Decorations": {}
+}
