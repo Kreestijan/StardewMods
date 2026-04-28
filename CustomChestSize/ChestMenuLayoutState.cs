@@ -1,3 +1,5 @@
+using Microsoft.Xna.Framework;
+
 namespace CustomChestSize;
 
 internal sealed class ChestMenuLayoutState
@@ -11,6 +13,8 @@ internal sealed class ChestMenuLayoutState
     public int OverlayAnchorY { get; }
 
     public int ChestPanelTop { get; }
+
+    public Rectangle ChestPanelBounds { get; set; }
 
     public int UnlimitedStorageSearchAppliedXOffset { get; set; }
 

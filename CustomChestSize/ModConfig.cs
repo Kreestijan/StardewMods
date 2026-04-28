@@ -10,6 +10,26 @@ internal sealed class ModConfig
 
     public int BigChestRows { get; set; } = 12;
 
+    public int StoneChestColumns { get; set; } = 14;
+
+    public int StoneChestRows { get; set; } = 6;
+
+    public int BigStoneChestColumns { get; set; } = 24;
+
+    public int BigStoneChestRows { get; set; } = 12;
+
+    public int FridgeColumns { get; set; } = 14;
+
+    public int FridgeRows { get; set; } = 6;
+
+    public int MiniFridgeColumns { get; set; } = 14;
+
+    public int MiniFridgeRows { get; set; } = 6;
+
+    public int JunimoChestColumns { get; set; } = 12;
+
+    public int JunimoChestRows { get; set; } = 6;
+
     public int ChestBackgroundHeightOffset { get; set; }
 
     public int InventoryPanelGapOffset { get; set; } = -12;
@@ -22,9 +42,21 @@ internal sealed class ModConfig
 
     public int ChestsAnywhereWidgetYOffset { get; set; } = 28;
 
+    public int ConvenientChestsXOffset { get; set; } = -184;
+
+    public int ConvenientChestsYOffset { get; set; }
+
+    public int CategorizeChestsXOffset { get; set; } = -40;
+
+    public int CategorizeChestsYOffset { get; set; } = -72;
+
     public int ColorPickerXOffset { get; set; } = 328;
 
     public int ColorPickerYOffset { get; set; } = 48;
+
+    public int RemoteFridgeStorageXOffset { get; set; } = 64;
+
+    public int RemoteFridgeStorageYOffset { get; set; } = -72;
 
     public int UnlimitedStorageSearchXOffset { get; set; } = 200;
 
@@ -33,4 +65,18 @@ internal sealed class ModConfig
     public int UnlimitedStorageSearchLeftOffset { get; set; } = -112;
 
     public int UnlimitedStorageSearchRightOffset { get; set; } = -160;
+
+    public bool DebugLogEnabled { get; set; } = false;
+
+    public bool TintChestUI { get; set; } = false;
+
+    public int TintChestUIOpacity { get; set; } = 75;
+
+    public int TintChestUIPaddingLeft { get; set; } = -40;
+
+    public int TintChestUIPaddingRight { get; set; } = -40;
+
+    public int TintChestUIPaddingTop { get; set; } = -56;
+
+    public int TintChestUIPaddingBottom { get; set; } = -24;
 }

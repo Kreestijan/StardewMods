@@ -1,8 +1,10 @@
 using HarmonyLib;
+using Microsoft.Xna.Framework;
 using System.Runtime.CompilerServices;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
+using StardewValley.Locations;
 using StardewValley.Menus;
 using StardewValley.Objects;
 
@@ -12,6 +14,9 @@ public sealed class ModEntry : Mod
 {
     private const string GenericModConfigMenuId = "spacechase0.GenericModConfigMenu";
     private const string UnlimitedStorageId = "furyx639.UnlimitedStorage";
+    private const string ConvenientChestsId = "aEnigma.ConvenientChests";
+    private const string CategorizeChestsId = "putaohuqi.CategorizeChests";
+    private const string RemoteFridgeStorageId = "EternalSoap.RemoteFridgeStorage";
     private const int PanelGap = 0;
     private const int LowerPanelHeight = 232;
     private const int LowerInventoryTopPadding = 24;
@@ -26,13 +31,49 @@ public sealed class ModEntry : Mod
     private const int MinRegularChestRows = 3;
     private const int MinBigChestColumns = 14;
     private const int MinBigChestRows = 5;
+    private const int MinBigStoneChestColumns = 14;
+    private const int MinBigStoneChestRows = 5;
+    private const int MinStoneChestColumns = 12;
+    private const int MinStoneChestRows = 3;
+    private const int MinFridgeColumns = 12;
+    private const int MinFridgeRows = 3;
+    private const int MinMiniFridgeColumns = 12;
+    private const int MinMiniFridgeRows = 3;
+    private const int MinJunimoChestColumns = 3;
+    private const int MinJunimoChestRows = 3;
     private const int MaxColumns = 24;
     private const int MaxRows = 12;
     private const int MinLayoutOffset = -200;
     private const int MaxLayoutOffset = 200;
+    private const int MinConvenientChestsOffset = -1000;
+    private const int MaxConvenientChestsOffset = 1000;
     private const int MinColorPickerOffset = -1000;
     private const int MaxColorPickerOffset = 1000;
     private static readonly ConditionalWeakTable<ItemGrabMenu, ChestMenuLayoutState> LayoutStates = new();
+
+    internal void LogDebug(string message)
+    {
+        lock (ConfigLock)
+        {
+            if (this.config.DebugLogEnabled)
+            {
+                this.Monitor.Log(message, LogLevel.Debug);
+            }
+        }
+    }
+
+    internal bool ShouldLogDebug()
+    {
+        lock (ConfigLock)
+        {
+            return this.config.DebugLogEnabled;
+        }
+    }
+
+    internal static void LogDebugStatic(string message)
+    {
+        Instance.LogDebug(message);
+    }
 
     private static readonly object ConfigLock = new();
 
@@ -134,9 +175,110 @@ public sealed class ModEntry : Mod
         }
     }
 
+    internal static int GetConvenientChestsXOffset()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.ConvenientChestsXOffset;
+        }
+    }
+
+    internal static int GetConvenientChestsYOffset()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.ConvenientChestsYOffset;
+        }
+    }
+
+    internal static int GetRemoteFridgeStorageXOffset()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.RemoteFridgeStorageXOffset;
+        }
+    }
+
+    internal static int GetRemoteFridgeStorageYOffset()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.RemoteFridgeStorageYOffset;
+        }
+    }
+
+    internal static bool IsTintChestUIEnabled()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.TintChestUI;
+        }
+    }
+
+    internal static int GetTintChestUIOpacity()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.TintChestUIOpacity;
+        }
+    }
+
+    internal static int GetTintChestUIPaddingLeft()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.TintChestUIPaddingLeft;
+        }
+    }
+
+    internal static int GetTintChestUIPaddingRight()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.TintChestUIPaddingRight;
+        }
+    }
+
+    internal static int GetTintChestUIPaddingTop()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.TintChestUIPaddingTop;
+        }
+    }
+
+    internal static int GetTintChestUIPaddingBottom()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.TintChestUIPaddingBottom;
+        }
+    }
+
+    internal static int GetCategorizeChestsXOffset()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.CategorizeChestsXOffset;
+        }
+    }
+
+    internal static int GetCategorizeChestsYOffset()
+    {
+        lock (ConfigLock)
+        {
+            return Instance.config.CategorizeChestsYOffset;
+        }
+    }
+
     internal static bool IsUnlimitedStorageLoaded()
     {
         return Instance.Helper.ModRegistry.IsLoaded(UnlimitedStorageId);
+    }
+
+    internal static bool IsConvenientChestsLoaded()
+    {
+        return Instance.Helper.ModRegistry.IsLoaded(ConvenientChestsId);
     }
 
     private void ReloadConfigCommand(string command, string[] args)
@@ -150,6 +292,9 @@ public sealed class ModEntry : Mod
     {
         this.RegisterGenericModConfigMenu();
         this.PatchChestsAnywhereCompatibility();
+        this.PatchConvenientChestsCompatibility();
+        this.PatchCategorizeChestsCompatibility();
+        this.PatchRemoteFridgeStorageCompatibility();
         this.InitUnlimitedStorageCompatibility();
     }
 
@@ -162,6 +307,9 @@ public sealed class ModEntry : Mod
         }
 
         bool hasChestsAnywhere = this.Helper.ModRegistry.IsLoaded("Pathoschild.ChestsAnywhere");
+        bool hasConvenientChests = this.Helper.ModRegistry.IsLoaded(ConvenientChestsId);
+        bool hasCategorizeChests = this.Helper.ModRegistry.IsLoaded(CategorizeChestsId);
+        bool hasRemoteFridgeStorage = this.Helper.ModRegistry.IsLoaded(RemoteFridgeStorageId);
         bool hasUnlimitedStorage = this.Helper.ModRegistry.IsLoaded(UnlimitedStorageId);
 
         gmcm.Register(
@@ -219,6 +367,136 @@ public sealed class ModEntry : Mod
             name: () => "Rows",
             tooltip: () => "How many rows a big chest has.",
             min: MinBigChestRows,
+            max: MaxRows,
+            interval: 1
+        );
+
+        gmcm.AddSectionTitle(
+            this.ModManifest,
+            text: () => "Stone chest",
+            tooltip: () => "Configure stone chest size."
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.StoneChestColumns,
+            setValue: this.SetStoneChestColumns,
+            name: () => "Columns",
+            tooltip: () => "How many slots each row has in a stone chest.",
+            min: MinStoneChestColumns,
+            max: MaxColumns,
+            interval: 1
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.StoneChestRows,
+            setValue: this.SetStoneChestRows,
+            name: () => "Rows",
+            tooltip: () => "How many rows a stone chest has.",
+            min: MinStoneChestRows,
+            max: MaxRows,
+            interval: 1
+        );
+
+        gmcm.AddSectionTitle(
+            this.ModManifest,
+            text: () => "Big stone chest",
+            tooltip: () => "Configure big stone chest size."
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.BigStoneChestColumns,
+            setValue: this.SetBigStoneChestColumns,
+            name: () => "Columns",
+            tooltip: () => "How many slots each row has in a big stone chest.",
+            min: MinBigStoneChestColumns,
+            max: MaxColumns,
+            interval: 1
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.BigStoneChestRows,
+            setValue: this.SetBigStoneChestRows,
+            name: () => "Rows",
+            tooltip: () => "How many rows a big stone chest has.",
+            min: MinBigStoneChestRows,
+            max: MaxRows,
+            interval: 1
+        );
+
+        gmcm.AddSectionTitle(
+            this.ModManifest,
+            text: () => "Fridge",
+            tooltip: () => "Configure the farmhouse fridge size."
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.FridgeColumns,
+            setValue: this.SetFridgeColumns,
+            name: () => "Columns",
+            tooltip: () => "How many slots each row has in the farmhouse fridge.",
+            min: MinFridgeColumns,
+            max: MaxColumns,
+            interval: 1
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.FridgeRows,
+            setValue: this.SetFridgeRows,
+            name: () => "Rows",
+            tooltip: () => "How many rows the farmhouse fridge has.",
+            min: MinFridgeRows,
+            max: MaxRows,
+            interval: 1
+        );
+
+        gmcm.AddSectionTitle(
+            this.ModManifest,
+            text: () => "Mini-fridge",
+            tooltip: () => "Configure placed mini-fridge size."
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.MiniFridgeColumns,
+            setValue: this.SetMiniFridgeColumns,
+            name: () => "Columns",
+            tooltip: () => "How many slots each row has in a mini-fridge.",
+            min: MinMiniFridgeColumns,
+            max: MaxColumns,
+            interval: 1
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.MiniFridgeRows,
+            setValue: this.SetMiniFridgeRows,
+            name: () => "Rows",
+            tooltip: () => "How many rows a mini-fridge has.",
+            min: MinMiniFridgeRows,
+            max: MaxRows,
+            interval: 1
+        );
+
+        gmcm.AddSectionTitle(
+            this.ModManifest,
+            text: () => "Junimo chest",
+            tooltip: () => "Configure junimo chest size."
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.JunimoChestColumns,
+            setValue: this.SetJunimoChestColumns,
+            name: () => "Columns",
+            tooltip: () => "How many slots each row has in a junimo chest.",
+            min: MinJunimoChestColumns,
+            max: MaxColumns,
+            interval: 1
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.JunimoChestRows,
+            setValue: this.SetJunimoChestRows,
+            name: () => "Rows",
+            tooltip: () => "How many rows a junimo chest has.",
+            min: MinJunimoChestRows,
             max: MaxRows,
             interval: 1
         );
@@ -288,83 +566,67 @@ public sealed class ModEntry : Mod
             max: MaxColorPickerOffset,
             interval: 4
         );
-        if (hasChestsAnywhere)
+        bool hasAnyCompat = hasChestsAnywhere || hasUnlimitedStorage || hasConvenientChests || hasCategorizeChests || hasRemoteFridgeStorage;
+
+        if (hasAnyCompat)
+            gmcm.AddPageLink(this.ModManifest, "compatibility", () => "Compatibility", () => "Configure compatibility offsets for other mods.");
+        gmcm.AddPageLink(this.ModManifest, "extra-features", () => "Extra Features", () => "Additional features like chest UI tinting.");
+        gmcm.AddPageLink(this.ModManifest, "debug", () => "Debug", () => "Debug logging options.");
+
+        if (hasAnyCompat)
         {
-            gmcm.AddSectionTitle(
-                this.ModManifest,
-                text: () => "Chests Anywhere",
-                tooltip: () => "These offsets move Chests Anywhere's chest overlay widgets when that mod is installed."
-            );
-            gmcm.AddNumberOption(
-                this.ModManifest,
-                getValue: () => this.config.ChestsAnywhereWidgetXOffset,
-                setValue: value => this.config.ChestsAnywhereWidgetXOffset = value,
-                name: () => "CA widget X",
-                tooltip: () => "Moves the Chests Anywhere overlay widgets left or right.",
-                min: MinLayoutOffset,
-                max: MaxLayoutOffset,
-                interval: 4
-            );
-            gmcm.AddNumberOption(
-                this.ModManifest,
-                getValue: () => this.config.ChestsAnywhereWidgetYOffset,
-                setValue: value => this.config.ChestsAnywhereWidgetYOffset = value,
-                name: () => "CA widget Y",
-                tooltip: () => "Moves the Chests Anywhere overlay widgets up or down.",
-                min: MinLayoutOffset,
-                max: MaxLayoutOffset,
-                interval: 4
-            );
+            gmcm.AddPage(this.ModManifest, "compatibility", () => "Compatibility");
+
+            if (hasChestsAnywhere)
+            {
+                gmcm.AddSectionTitle(this.ModManifest, text: () => "Chests Anywhere", tooltip: () => "These offsets move Chests Anywhere's chest overlay widgets when that mod is installed.");
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ChestsAnywhereWidgetXOffset, setValue: value => this.config.ChestsAnywhereWidgetXOffset = value, name: () => "CA widget X", tooltip: () => "Moves the Chests Anywhere overlay widgets left or right.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ChestsAnywhereWidgetYOffset, setValue: value => this.config.ChestsAnywhereWidgetYOffset = value, name: () => "CA widget Y", tooltip: () => "Moves the Chests Anywhere overlay widgets up or down.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+            }
+
+            if (hasUnlimitedStorage)
+            {
+                gmcm.AddSectionTitle(this.ModManifest, text: () => "Unlimited Storage", tooltip: () => "These offsets move Unlimited Storage's search field when that mod is installed.");
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchXOffset, setValue: value => this.config.UnlimitedStorageSearchXOffset = value, name: () => "Search X", tooltip: () => "Moves Unlimited Storage's search field left or right.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchYOffset, setValue: value => this.config.UnlimitedStorageSearchYOffset = value, name: () => "Search Y", tooltip: () => "Moves Unlimited Storage's search field up or down.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchLeftOffset, setValue: value => this.config.UnlimitedStorageSearchLeftOffset = value, name: () => "Search left", tooltip: () => "Extends or shrinks the left side of Unlimited Storage's search field.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchRightOffset, setValue: value => this.config.UnlimitedStorageSearchRightOffset = value, name: () => "Search right", tooltip: () => "Extends or shrinks the right side of Unlimited Storage's search field.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+            }
+
+            if (hasConvenientChests)
+            {
+                gmcm.AddSectionTitle(this.ModManifest, text: () => "Convenient Chests", tooltip: () => "These offsets move Convenient Chests' Categorize and Stash buttons when that mod is installed.");
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ConvenientChestsXOffset, setValue: value => this.config.ConvenientChestsXOffset = value, name: () => "X offset", tooltip: () => "Moves Convenient Chests' button row left or right.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ConvenientChestsYOffset, setValue: value => this.config.ConvenientChestsYOffset = value, name: () => "Y offset", tooltip: () => "Moves Convenient Chests' button row and category popup up or down.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+            }
+
+            if (hasCategorizeChests)
+            {
+                gmcm.AddSectionTitle(this.ModManifest, text: () => "Categorize Chests", tooltip: () => "These offsets move Categorize Chests' Categorize and Stash buttons when that mod is installed.");
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.CategorizeChestsXOffset, setValue: value => this.config.CategorizeChestsXOffset = value, name: () => "X offset", tooltip: () => "Moves Categorize Chests' button row left or right.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.CategorizeChestsYOffset, setValue: value => this.config.CategorizeChestsYOffset = value, name: () => "Y offset", tooltip: () => "Moves Categorize Chests' button row and category popup up or down.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+            }
+
+            if (hasRemoteFridgeStorage)
+            {
+                gmcm.AddSectionTitle(this.ModManifest, text: () => "Remote Fridge Storage", tooltip: () => "These offsets move Remote Fridge Storage's fridge icon when that mod is installed.");
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.RemoteFridgeStorageXOffset, setValue: value => this.config.RemoteFridgeStorageXOffset = value, name: () => "X offset", tooltip: () => "Moves the Remote Fridge Storage icon left or right.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.RemoteFridgeStorageYOffset, setValue: value => this.config.RemoteFridgeStorageYOffset = value, name: () => "Y offset", tooltip: () => "Moves the Remote Fridge Storage icon up or down.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+            }
         }
 
-        if (hasUnlimitedStorage)
-        {
-            gmcm.AddSectionTitle(
-                this.ModManifest,
-                text: () => "Unlimited Storage",
-                tooltip: () => "These offsets move Unlimited Storage's search field when that mod is installed."
-            );
-            gmcm.AddNumberOption(
-                this.ModManifest,
-                getValue: () => this.config.UnlimitedStorageSearchXOffset,
-                setValue: value => this.config.UnlimitedStorageSearchXOffset = value,
-                name: () => "Search X",
-                tooltip: () => "Moves Unlimited Storage's search field left or right.",
-                min: MinLayoutOffset,
-                max: MaxLayoutOffset,
-                interval: 4
-            );
-            gmcm.AddNumberOption(
-                this.ModManifest,
-                getValue: () => this.config.UnlimitedStorageSearchYOffset,
-                setValue: value => this.config.UnlimitedStorageSearchYOffset = value,
-                name: () => "Search Y",
-                tooltip: () => "Moves Unlimited Storage's search field up or down.",
-                min: MinLayoutOffset,
-                max: MaxLayoutOffset,
-                interval: 4
-            );
-            gmcm.AddNumberOption(
-                this.ModManifest,
-                getValue: () => this.config.UnlimitedStorageSearchLeftOffset,
-                setValue: value => this.config.UnlimitedStorageSearchLeftOffset = value,
-                name: () => "Search left",
-                tooltip: () => "Extends or shrinks the left side of Unlimited Storage's search field.",
-                min: MinLayoutOffset,
-                max: MaxLayoutOffset,
-                interval: 4
-            );
-            gmcm.AddNumberOption(
-                this.ModManifest,
-                getValue: () => this.config.UnlimitedStorageSearchRightOffset,
-                setValue: value => this.config.UnlimitedStorageSearchRightOffset = value,
-                name: () => "Search right",
-                tooltip: () => "Extends or shrinks the right side of Unlimited Storage's search field.",
-                min: MinLayoutOffset,
-                max: MaxLayoutOffset,
-                interval: 4
-            );
-        }
+        gmcm.AddPage(this.ModManifest, "extra-features", () => "Extra Features");
+        gmcm.AddSectionTitle(this.ModManifest, text: () => "Chest UI tint", tooltip: () => "Tint the chest menu background to match the chest's color.");
+        gmcm.AddBoolOption(this.ModManifest, getValue: () => this.config.TintChestUI, setValue: value => this.config.TintChestUI = value, name: () => "Also apply Chest Tint to UI", tooltip: () => "When enabled and a chest has a color from the color picker, the chest menu background will be tinted to match.");
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIOpacity, setValue: value => this.config.TintChestUIOpacity = value, name: () => "UI Tint Opacity %", tooltip: () => "How strong the tint is. 0 = invisible, 100 = fully opaque.", min: 0, max: 100, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingLeft, setValue: value => this.config.TintChestUIPaddingLeft = value, name: () => "Tint padding left", tooltip: () => "Extend the tint overlay leftward.", min: -200, max: 200, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingRight, setValue: value => this.config.TintChestUIPaddingRight = value, name: () => "Tint padding right", tooltip: () => "Extend the tint overlay rightward.", min: -200, max: 200, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingTop, setValue: value => this.config.TintChestUIPaddingTop = value, name: () => "Tint padding top", tooltip: () => "Extend the tint overlay upward.", min: -200, max: 200, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingBottom, setValue: value => this.config.TintChestUIPaddingBottom = value, name: () => "Tint padding bottom", tooltip: () => "Extend the tint overlay downward.", min: -200, max: 200, interval: 1);
+
+        gmcm.AddPage(this.ModManifest, "debug", () => "Debug");
+        gmcm.AddSectionTitle(this.ModManifest, text: () => "Debug", tooltip: () => "Enable debug logging to diagnose issues.");
+        gmcm.AddBoolOption(this.ModManifest, getValue: () => this.config.DebugLogEnabled, setValue: value => this.config.DebugLogEnabled = value, name: () => "Debug logging", tooltip: () => "When enabled, logs detailed chest layout info to the SMAPI console.");
 
         gmcm.OnFieldChanged(
             this.ModManifest,
@@ -407,20 +669,62 @@ public sealed class ModEntry : Mod
     {
         lock (ConfigLock)
         {
-            switch (chest.SpecialChestType)
+            this.LogDebug($"[TryGetConfiguredLayoutCore] chest ItemId={chest.ItemId} Name={chest.Name} SpecialChestType={chest.SpecialChestType} playerChest={chest.playerChest.Value}");
+
+            // Note: ItemId is used to distinguish chest types because some mods may set
+            // SpecialChestType to BigChest on all player chests.
+            switch (chest.ItemId)
             {
-                case Chest.SpecialChestTypes.BigChest:
+                case "BigChest":
+                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected BIG layout: {this.config.BigChestColumns}x{this.config.BigChestRows}");
                     layout = new ChestGridLayout(this.config.BigChestColumns, this.config.BigChestRows);
                     return true;
 
-                case Chest.SpecialChestTypes.None when chest.playerChest.Value:
+                case "BigStoneChest":
+                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected BIG STONE layout: {this.config.BigStoneChestColumns}x{this.config.BigStoneChestRows}");
+                    layout = new ChestGridLayout(this.config.BigStoneChestColumns, this.config.BigStoneChestRows);
+                    return true;
+
+                case "130":
+                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected REGULAR layout: {this.config.RegularChestColumns}x{this.config.RegularChestRows}");
                     layout = new ChestGridLayout(this.config.RegularChestColumns, this.config.RegularChestRows);
                     return true;
 
-                default:
-                    layout = default;
-                    return false;
+                case "232":
+                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected STONE layout: {this.config.StoneChestColumns}x{this.config.StoneChestRows}");
+                    layout = new ChestGridLayout(this.config.StoneChestColumns, this.config.StoneChestRows);
+                    return true;
+
+                case "216":
+                    if (chest.Location is FarmHouse farmHouse && farmHouse.fridge.Value == chest)
+                    {
+                        this.LogDebug($"[TryGetConfiguredLayoutCore] Selected FRIDGE layout: {this.config.FridgeColumns}x{this.config.FridgeRows}");
+                        layout = new ChestGridLayout(this.config.FridgeColumns, this.config.FridgeRows);
+                    }
+                    else
+                    {
+                        this.LogDebug($"[TryGetConfiguredLayoutCore] Selected MINI-FRIDGE layout: {this.config.MiniFridgeColumns}x{this.config.MiniFridgeRows}");
+                        layout = new ChestGridLayout(this.config.MiniFridgeColumns, this.config.MiniFridgeRows);
+                    }
+                    return true;
+
+                case "256":
+                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected JUNIMO layout: {this.config.JunimoChestColumns}x{this.config.JunimoChestRows}");
+                    layout = new ChestGridLayout(this.config.JunimoChestColumns, this.config.JunimoChestRows);
+                    return true;
             }
+
+            // Fallback for any other player chest (e.g. from mods)
+            if (chest.playerChest.Value)
+            {
+                this.LogDebug($"[TryGetConfiguredLayoutCore] Selected REGULAR layout (fallback): {this.config.RegularChestColumns}x{this.config.RegularChestRows}");
+                layout = new ChestGridLayout(this.config.RegularChestColumns, this.config.RegularChestRows);
+                return true;
+            }
+
+            this.LogDebug($"[TryGetConfiguredLayoutCore] No matching layout. playerChest={chest.playerChest.Value}");
+            layout = default;
+            return false;
         }
     }
 
@@ -512,7 +816,15 @@ public sealed class ModEntry : Mod
         menu.RepositionSideButtons();
         menu.SetupBorderNeighbors();
         menu.populateClickableComponentList();
-        this.SetLayoutState(menu, new ChestMenuLayoutState(chestPanelTop, chestPanelTop));
+        this.SetLayoutState(menu, new ChestMenuLayoutState(chestPanelTop, chestPanelTop)
+        {
+            ChestPanelBounds = new Rectangle(
+                menu.ItemsToGrabMenu.xPositionOnScreen,
+                menu.ItemsToGrabMenu.yPositionOnScreen,
+                menu.ItemsToGrabMenu.width,
+                menu.ItemsToGrabMenu.height
+            )
+        });
         this.ReanchorColorPickerStripCore(menu, chestPanelTop);
 
         if (Game1.options.SnappyMenus)
@@ -588,14 +900,22 @@ public sealed class ModEntry : Mod
         int top = int.MaxValue;
         int bottom = int.MinValue;
 
+        this.LogDebug($"[RepositionLowerPanel] inventory.Count={menu.inventory.inventory.Count} capacity={menu.inventory.capacity} rows={menu.inventory.rows}");
+
         foreach (ClickableComponent slot in menu.inventory.inventory)
         {
+            if (slot.bounds.Width <= 0 || slot.bounds.Height <= 0)
+            {
+                continue;
+            }
+
             top = System.Math.Min(top, slot.bounds.Top);
             bottom = System.Math.Max(bottom, slot.bounds.Bottom);
         }
 
         if (top == int.MaxValue || bottom == int.MinValue)
         {
+            this.LogDebug($"[RepositionLowerPanel] No valid slots found, skipping.");
             return;
         }
 
@@ -603,6 +923,8 @@ public sealed class ModEntry : Mod
         int lowerBackgroundBottom = bottom + LowerBackgroundBottomPadding + this.config.InventoryBackgroundBottomOffset;
         menu.yPositionOnScreen = lowerBackgroundTop - LowerPanelTopOffset;
         menu.height = lowerBackgroundBottom - lowerBackgroundTop + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 192;
+
+        this.LogDebug($"[RepositionLowerPanel] top={top} bottom={bottom} menu.yPositionOnScreen={menu.yPositionOnScreen} menu.height={menu.height}");
     }
 
     private int GetChestsAnywhereWidgetXOffsetCore()
@@ -627,6 +949,16 @@ public sealed class ModEntry : Mod
         this.config.RegularChestRows = this.Clamp(this.config.RegularChestRows, MinRegularChestRows, MaxRows, nameof(this.config.RegularChestRows));
         this.config.BigChestColumns = this.Clamp(this.config.BigChestColumns, MinBigChestColumns, MaxColumns, nameof(this.config.BigChestColumns));
         this.config.BigChestRows = this.Clamp(this.config.BigChestRows, MinBigChestRows, MaxRows, nameof(this.config.BigChestRows));
+        this.config.BigStoneChestColumns = this.Clamp(this.config.BigStoneChestColumns, MinBigStoneChestColumns, MaxColumns, nameof(this.config.BigStoneChestColumns));
+        this.config.BigStoneChestRows = this.Clamp(this.config.BigStoneChestRows, MinBigStoneChestRows, MaxRows, nameof(this.config.BigStoneChestRows));
+        this.config.StoneChestColumns = this.Clamp(this.config.StoneChestColumns, MinStoneChestColumns, MaxColumns, nameof(this.config.StoneChestColumns));
+        this.config.StoneChestRows = this.Clamp(this.config.StoneChestRows, MinStoneChestRows, MaxRows, nameof(this.config.StoneChestRows));
+        this.config.FridgeColumns = this.Clamp(this.config.FridgeColumns, MinFridgeColumns, MaxColumns, nameof(this.config.FridgeColumns));
+        this.config.FridgeRows = this.Clamp(this.config.FridgeRows, MinFridgeRows, MaxRows, nameof(this.config.FridgeRows));
+        this.config.MiniFridgeColumns = this.Clamp(this.config.MiniFridgeColumns, MinMiniFridgeColumns, MaxColumns, nameof(this.config.MiniFridgeColumns));
+        this.config.MiniFridgeRows = this.Clamp(this.config.MiniFridgeRows, MinMiniFridgeRows, MaxRows, nameof(this.config.MiniFridgeRows));
+        this.config.JunimoChestColumns = this.Clamp(this.config.JunimoChestColumns, MinJunimoChestColumns, MaxColumns, nameof(this.config.JunimoChestColumns));
+        this.config.JunimoChestRows = this.Clamp(this.config.JunimoChestRows, MinJunimoChestRows, MaxRows, nameof(this.config.JunimoChestRows));
         this.config.ChestBackgroundHeightOffset = this.Clamp(this.config.ChestBackgroundHeightOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.ChestBackgroundHeightOffset));
         this.config.InventoryPanelGapOffset = this.Clamp(this.config.InventoryPanelGapOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.InventoryPanelGapOffset));
         this.config.InventoryBackgroundTopOffset = this.Clamp(this.config.InventoryBackgroundTopOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.InventoryBackgroundTopOffset));
@@ -639,6 +971,17 @@ public sealed class ModEntry : Mod
         this.config.UnlimitedStorageSearchYOffset = this.Clamp(this.config.UnlimitedStorageSearchYOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.UnlimitedStorageSearchYOffset));
         this.config.UnlimitedStorageSearchLeftOffset = this.Clamp(this.config.UnlimitedStorageSearchLeftOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.UnlimitedStorageSearchLeftOffset));
         this.config.UnlimitedStorageSearchRightOffset = this.Clamp(this.config.UnlimitedStorageSearchRightOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.UnlimitedStorageSearchRightOffset));
+        this.config.ConvenientChestsXOffset = this.Clamp(this.config.ConvenientChestsXOffset, MinConvenientChestsOffset, MaxConvenientChestsOffset, nameof(this.config.ConvenientChestsXOffset));
+        this.config.ConvenientChestsYOffset = this.Clamp(this.config.ConvenientChestsYOffset, MinConvenientChestsOffset, MaxConvenientChestsOffset, nameof(this.config.ConvenientChestsYOffset));
+        this.config.CategorizeChestsXOffset = this.Clamp(this.config.CategorizeChestsXOffset, MinConvenientChestsOffset, MaxConvenientChestsOffset, nameof(this.config.CategorizeChestsXOffset));
+        this.config.CategorizeChestsYOffset = this.Clamp(this.config.CategorizeChestsYOffset, MinConvenientChestsOffset, MaxConvenientChestsOffset, nameof(this.config.CategorizeChestsYOffset));
+        this.config.RemoteFridgeStorageXOffset = this.Clamp(this.config.RemoteFridgeStorageXOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.RemoteFridgeStorageXOffset));
+        this.config.RemoteFridgeStorageYOffset = this.Clamp(this.config.RemoteFridgeStorageYOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.RemoteFridgeStorageYOffset));
+        this.config.TintChestUIOpacity = this.Clamp(this.config.TintChestUIOpacity, 0, 100, nameof(this.config.TintChestUIOpacity));
+        this.config.TintChestUIPaddingLeft = this.Clamp(this.config.TintChestUIPaddingLeft, -200, 200, nameof(this.config.TintChestUIPaddingLeft));
+        this.config.TintChestUIPaddingRight = this.Clamp(this.config.TintChestUIPaddingRight, -200, 200, nameof(this.config.TintChestUIPaddingRight));
+        this.config.TintChestUIPaddingTop = this.Clamp(this.config.TintChestUIPaddingTop, -200, 200, nameof(this.config.TintChestUIPaddingTop));
+        this.config.TintChestUIPaddingBottom = this.Clamp(this.config.TintChestUIPaddingBottom, -200, 200, nameof(this.config.TintChestUIPaddingBottom));
     }
 
     private void SetRegularChestColumns(int value)
@@ -670,6 +1013,86 @@ public sealed class ModEntry : Mod
         lock (ConfigLock)
         {
             this.config.BigChestRows = value;
+        }
+    }
+
+    private void SetBigStoneChestColumns(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.BigStoneChestColumns = value;
+        }
+    }
+
+    private void SetBigStoneChestRows(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.BigStoneChestRows = value;
+        }
+    }
+
+    private void SetStoneChestColumns(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.StoneChestColumns = value;
+        }
+    }
+
+    private void SetStoneChestRows(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.StoneChestRows = value;
+        }
+    }
+
+    private void SetFridgeColumns(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.FridgeColumns = value;
+        }
+    }
+
+    private void SetFridgeRows(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.FridgeRows = value;
+        }
+    }
+
+    private void SetMiniFridgeColumns(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.MiniFridgeColumns = value;
+        }
+    }
+
+    private void SetMiniFridgeRows(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.MiniFridgeRows = value;
+        }
+    }
+
+    private void SetJunimoChestColumns(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.JunimoChestColumns = value;
+        }
+    }
+
+    private void SetJunimoChestRows(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.JunimoChestRows = value;
         }
     }
 
@@ -708,6 +1131,105 @@ public sealed class ModEntry : Mod
             this.harmony.Patch(
                 topOffsetMethod,
                 postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.ChestsAnywhere_GetTopOffset_Postfix))
+            );
+        }
+    }
+
+    private void PatchConvenientChestsCompatibility()
+    {
+        if (!this.Helper.ModRegistry.IsLoaded(ConvenientChestsId) || this.harmony is null)
+        {
+            return;
+        }
+
+        Type? chestOverlayType = AccessTools.TypeByName("ConvenientChests.CategorizeChests.Interface.Widgets.ChestOverlay");
+        System.Reflection.MethodInfo? positionButtonsMethod = AccessTools.Method(chestOverlayType, "PositionButtons");
+        System.Reflection.MethodInfo? openCategoryMenuMethod = AccessTools.Method(chestOverlayType, "OpenCategoryMenu");
+        System.Reflection.MethodInfo? drawMethod = AccessTools.Method(chestOverlayType, "Draw");
+        if (positionButtonsMethod is not null)
+        {
+            this.harmony.Patch(
+                positionButtonsMethod,
+                postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.ConvenientChests_PositionButtons_Postfix))
+            );
+        }
+        if (openCategoryMenuMethod is not null)
+        {
+            this.harmony.Patch(
+                openCategoryMenuMethod,
+                postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.ConvenientChests_OpenCategoryMenu_Postfix))
+            );
+        }
+        if (drawMethod is not null)
+        {
+            this.harmony.Patch(
+                drawMethod,
+                prefix: new HarmonyMethod(typeof(Patches), nameof(Patches.ConvenientChests_Draw_Prefix))
+            );
+        }
+    }
+
+    private void PatchCategorizeChestsCompatibility()
+    {
+        if (!this.Helper.ModRegistry.IsLoaded(CategorizeChestsId) || this.harmony is null)
+        {
+            return;
+        }
+
+        Type? chestOverlayType = AccessTools.TypeByName("StardewValleyMods.CategorizeChests.Interface.Widgets.ChestOverlay");
+        Type? categorizeChestsModType = AccessTools.TypeByName("StardewValleyMods.CategorizeChests.CategorizeChestsMod");
+        System.Reflection.MethodInfo? createMenuMethod = AccessTools.Method(categorizeChestsModType, "CreateMenu");
+        System.Reflection.MethodInfo? positionButtonsMethod = AccessTools.Method(chestOverlayType, "PositionButtons");
+        System.Reflection.MethodInfo? openCategoryMenuMethod = AccessTools.Method(chestOverlayType, "OpenCategoryMenu");
+
+        if (createMenuMethod is not null)
+        {
+            this.harmony.Patch(
+                createMenuMethod,
+                postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.CategorizeChests_CreateMenu_Postfix))
+            );
+        }
+
+        if (positionButtonsMethod is not null)
+        {
+            this.harmony.Patch(
+                positionButtonsMethod,
+                postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.CategorizeChests_PositionButtons_Postfix))
+            );
+        }
+
+        if (openCategoryMenuMethod is not null)
+        {
+            this.harmony.Patch(
+                openCategoryMenuMethod,
+                postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.CategorizeChests_OpenCategoryMenu_Postfix))
+            );
+        }
+    }
+
+    private void PatchRemoteFridgeStorageCompatibility()
+    {
+        if (!this.Helper.ModRegistry.IsLoaded(RemoteFridgeStorageId) || this.harmony is null)
+        {
+            return;
+        }
+
+        Type? chestControllerType = AccessTools.TypeByName("RemoteFridgeStorage.controller.ChestController");
+        System.Reflection.MethodInfo? updateButtonPositionMethod = AccessTools.Method(chestControllerType, "UpdateButtonPosition");
+        System.Reflection.MethodInfo? drawFridgeIconMethod = AccessTools.Method(chestControllerType, "DrawFridgeIcon");
+        if (updateButtonPositionMethod is not null)
+        {
+            this.harmony.Patch(
+                updateButtonPositionMethod,
+                postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.RemoteFridgeStorage_UpdateButtonPosition_Postfix))
+            );
+        }
+
+        if (drawFridgeIconMethod is not null)
+        {
+            this.harmony.Patch(
+                drawFridgeIconMethod,
+                prefix: new HarmonyMethod(typeof(Patches), nameof(Patches.RemoteFridgeStorage_DrawFridgeIcon_Prefix))
             );
         }
     }
@@ -785,4 +1307,5 @@ public sealed class ModEntry : Mod
 
         return clamped;
     }
+
 }

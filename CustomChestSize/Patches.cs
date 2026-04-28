@@ -1,9 +1,13 @@
 using HarmonyLib;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using StardewModdingAPI;
 using System.Reflection;
+using System.Linq;
 using StardewModdingAPI.Events;
 using StardewValley;
 using StardewValley.Menus;
+using StardewValley.Locations;
 using StardewValley.Objects;
 
 namespace CustomChestSize;
@@ -11,11 +15,29 @@ namespace CustomChestSize;
 [HarmonyPatch]
 internal static class Patches
 {
+    private const int convenientChestsReferenceColumns = 24;
+    private const int convenientChestsReferenceDeltaTiles = -128;
+    private static readonly int convenientChestsReferenceMenuWidth = System.Math.Max(
+        800 + IClickableMenu.borderWidth * 2,
+        convenientChestsReferenceColumns * 64 + (IClickableMenu.borderWidth + IClickableMenu.spaceToClearSideBorder) * 2
+    );
+
     [ThreadStatic]
     private static int suppressCustomCapacityDepth;
 
     private static PropertyInfo? usTextBoxProperty;
     private static FieldInfo? textBoxClickableComponentField;
+    private static PropertyInfo? convenientChestsWidgetPositionProperty;
+    private static PropertyInfo? categorizeChestsWidgetPositionProperty;
+    private static FieldInfo? convenientChestsOverlayItemGrabMenuField;
+    private static FieldInfo? convenientChestsOverlayChestField;
+    private static FieldInfo? convenientChestsOverlayCategorizeButtonField;
+    private static FieldInfo? convenientChestsOverlayStashButtonField;
+    private static FieldInfo? convenientChestsOverlayCategoryMenuField;
+    private static FieldInfo? categorizeChestsOverlayOpenButtonField;
+    private static FieldInfo? categorizeChestsOverlayStashButtonField;
+    private static FieldInfo? categorizeChestsOverlayCategoryMenuField;
+    private static object? activeConvenientChestsOverlay;
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(Chest), nameof(Chest.GetActualCapacity))]
@@ -60,6 +82,12 @@ internal static class Patches
         if (__state)
         {
             suppressCustomCapacityDepth++;
+
+            if (ModEntry.Instance.ShouldLogDebug())
+            {
+                Chest chest = (Chest)sourceItem;
+                ModEntry.LogDebugStatic($"[ItemGrabMenu_Constructor_Prefix] sourceItem ItemId={sourceItem.ItemId} Name={sourceItem.Name} SpecialChestType={chest.SpecialChestType} playerChest={chest.playerChest.Value} source={source}");
+            }
         }
     }
 
@@ -149,7 +177,63 @@ internal static class Patches
             return;
         }
 
+        ModEntry.ApplyLayoutIfNeeded(__instance);
         ModEntry.ReanchorColorPickerStrip(__instance);
+        RefreshConvenientChestsOverlayForMenu(__instance, (Chest)item);
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPriority(Priority.Last)]
+    [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.draw))]
+    private static void ItemGrabMenu_Draw_Postfix(ItemGrabMenu __instance, SpriteBatch b)
+    {
+        if (!ModEntry.TryGetLayoutState(__instance, out ChestMenuLayoutState state))
+            return;
+
+        if (!ModEntry.IsTintChestUIEnabled())
+            return;
+
+        int opacity = ModEntry.GetTintChestUIOpacity();
+        if (opacity <= 0)
+            return;
+
+        // Read the chest color live at draw time so color picker changes take effect immediately
+        if (__instance.sourceItem is not Chest chest)
+            return;
+
+        Color choiceColor = chest.playerChoiceColor.Value;
+        // No color selected: RGB values are all zero (black) or white
+        if (choiceColor.R == 0 && choiceColor.G == 0 && choiceColor.B == 0)
+            return;
+        if (choiceColor == Color.White)
+            return;
+
+        Rectangle bounds = state.ChestPanelBounds;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            return;
+
+        // Apply per-side padding
+        bounds.X += ModEntry.GetTintChestUIPaddingLeft();
+        bounds.Width -= ModEntry.GetTintChestUIPaddingLeft() + ModEntry.GetTintChestUIPaddingRight();
+        bounds.Y += ModEntry.GetTintChestUIPaddingTop();
+        bounds.Height -= ModEntry.GetTintChestUIPaddingTop() + ModEntry.GetTintChestUIPaddingBottom();
+
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            return;
+
+        // Blend the chest color into full white at the configured opacity (no alpha transparency)
+        float t = opacity / 100f;
+        Color tintColor = new Color(
+            (byte)(255 - (255 - choiceColor.R) * t),
+            (byte)(255 - (255 - choiceColor.G) * t),
+            (byte)(255 - (255 - choiceColor.B) * t)
+        );
+
+        // Redraw the chest panel background using the uncolored menu texture tinted with the chest color
+        IClickableMenu.drawTextureBox(b, Game1.uncoloredMenuTexture, new Rectangle(0, 256, 64, 64), bounds.X, bounds.Y, bounds.Width, bounds.Height, tintColor, 1f, false);
+
+        // Redraw the chest items on top so they're not buried under the tinted background
+        __instance.ItemsToGrabMenu.draw(b);
     }
 
     internal static void ChestsAnywhere_ReinitializeBaseComponents_Postfix(object __instance)
@@ -204,6 +288,384 @@ internal static class Patches
 
         MethodInfo? reinitialize = AccessTools.Method(dropdown.GetType(), "ReinitializeComponents");
         reinitialize?.Invoke(dropdown, null);
+    }
+
+    internal static void ConvenientChests_Draw_Prefix(object __instance)
+    {
+        convenientChestsOverlayItemGrabMenuField ??= AccessTools.Field(__instance.GetType(), "<ItemGrabMenu>k__BackingField");
+        if (convenientChestsOverlayItemGrabMenuField?.GetValue(__instance) is not ItemGrabMenu menu
+            || menu.sourceItem is not Chest chest)
+        {
+            return;
+        }
+
+        activeConvenientChestsOverlay = __instance;
+        convenientChestsOverlayChestField ??= AccessTools.Field(__instance.GetType(), "<Chest>k__BackingField");
+        convenientChestsOverlayChestField?.SetValue(__instance, chest);
+        Traverse.Create(__instance).Method("PositionButtons").GetValue();
+        ConvenientChests_PositionButtons_Postfix(__instance);
+    }
+
+    internal static void ConvenientChests_PositionButtons_Postfix(object __instance)
+    {
+        convenientChestsOverlayItemGrabMenuField ??= AccessTools.Field(__instance.GetType(), "<ItemGrabMenu>k__BackingField");
+        convenientChestsOverlayCategorizeButtonField ??= AccessTools.Field(__instance.GetType(), "<CategorizeButton>k__BackingField");
+        convenientChestsOverlayStashButtonField ??= AccessTools.Field(__instance.GetType(), "<StashButton>k__BackingField");
+        if (convenientChestsOverlayItemGrabMenuField?.GetValue(__instance) is not ItemGrabMenu menu
+            || convenientChestsOverlayCategorizeButtonField?.GetValue(__instance) is not object categorizeButton
+            || convenientChestsOverlayStashButtonField?.GetValue(__instance) is not object stashButton)
+        {
+            return;
+        }
+
+        Point? categorizePosition = GetWidgetPosition(categorizeButton);
+        Point? stashPosition = GetWidgetPosition(stashButton);
+        if (categorizePosition is null || stashPosition is null)
+        {
+            return;
+        }
+
+        int currentInset = menu.ItemsToGrabMenu.xPositionOnScreen - menu.xPositionOnScreen;
+        int targetX = menu.ItemsToGrabMenu.xPositionOnScreen
+            + convenientChestsReferenceMenuWidth / 2
+            + convenientChestsReferenceDeltaTiles * Game1.pixelZoom
+            - GetWidgetWidth(categorizeButton)
+            - currentInset
+            + ModEntry.GetConvenientChestsXOffset();
+        int targetY = menu.yPositionOnScreen + 22 * Game1.pixelZoom + ModEntry.GetConvenientChestsYOffset();
+
+        SetWidgetPosition(categorizeButton, targetX, targetY);
+        SetWidgetPosition(
+            stashButton,
+            targetX + GetWidgetWidth(categorizeButton) - GetWidgetWidth(stashButton),
+            targetY + GetWidgetHeight(categorizeButton)
+        );
+    }
+
+    internal static void ConvenientChests_OpenCategoryMenu_Postfix(object __instance)
+    {
+        convenientChestsOverlayCategoryMenuField ??= AccessTools.Field(__instance.GetType(), "<CategoryMenu>k__BackingField");
+        if (convenientChestsOverlayCategoryMenuField?.GetValue(__instance) is not object categoryMenu)
+        {
+            return;
+        }
+
+        OffsetWidgetPosition(categoryMenu, ModEntry.GetConvenientChestsXOffset(), ModEntry.GetConvenientChestsYOffset());
+    }
+
+    internal static void CategorizeChests_PositionButtons_Postfix(object __instance)
+    {
+        categorizeChestsOverlayOpenButtonField ??= AccessTools.Field(__instance.GetType(), "OpenButton");
+        categorizeChestsOverlayStashButtonField ??= AccessTools.Field(__instance.GetType(), "StashButton");
+        if (categorizeChestsOverlayOpenButtonField?.GetValue(__instance) is not object openButton
+            || categorizeChestsOverlayStashButtonField?.GetValue(__instance) is not object stashButton)
+        {
+            return;
+        }
+
+        OffsetCategorizeChestsWidgetPosition(openButton, ModEntry.GetCategorizeChestsXOffset(), ModEntry.GetCategorizeChestsYOffset());
+        OffsetCategorizeChestsWidgetPosition(stashButton, ModEntry.GetCategorizeChestsXOffset(), ModEntry.GetCategorizeChestsYOffset());
+    }
+
+    internal static void CategorizeChests_CreateMenu_Postfix(object __instance, ItemGrabMenu itemGrabMenu)
+    {
+        FieldInfo? widgetHostField = AccessTools.Field(__instance.GetType(), "WidgetHost");
+        if (widgetHostField?.GetValue(__instance) is not null)
+        {
+            return;
+        }
+
+        Chest? chest = ResolveCategorizeChestsChest(itemGrabMenu);
+        if (chest is null)
+        {
+            return;
+        }
+
+        FieldInfo? configField = AccessTools.Field(__instance.GetType(), "Config");
+        FieldInfo? chestDataManagerField = AccessTools.Field(__instance.GetType(), "ChestDataManager");
+        FieldInfo? chestFillerField = AccessTools.Field(__instance.GetType(), "ChestFiller");
+        FieldInfo? itemDataManagerField = AccessTools.Field(__instance.GetType(), "ItemDataManager");
+
+        object? config = configField?.GetValue(__instance);
+        object? chestDataManager = chestDataManagerField?.GetValue(__instance);
+        object? chestFiller = chestFillerField?.GetValue(__instance);
+        object? itemDataManager = itemDataManagerField?.GetValue(__instance);
+        if (config is null || chestDataManager is null || chestFiller is null || itemDataManager is null)
+        {
+            return;
+        }
+
+        IModHelper? helper = Traverse.Create(__instance).Property("Helper").GetValue<IModHelper>();
+        if (helper is null)
+        {
+            return;
+        }
+
+        Type? widgetHostType = AccessTools.TypeByName("StardewValleyMods.CategorizeChests.Interface.WidgetHost");
+        Type? chestOverlayType = AccessTools.TypeByName("StardewValleyMods.CategorizeChests.Interface.Widgets.ChestOverlay");
+        if (widgetHostType is null || chestOverlayType is null)
+        {
+            return;
+        }
+
+        object? widgetHost = Activator.CreateInstance(widgetHostType, helper);
+        if (widgetHost is null)
+        {
+            return;
+        }
+
+        object? tooltipManager = AccessTools.Field(widgetHostType, "TooltipManager")?.GetValue(widgetHost);
+        object? rootWidget = AccessTools.Field(widgetHostType, "RootWidget")?.GetValue(widgetHost);
+        if (tooltipManager is null || rootWidget is null)
+        {
+            return;
+        }
+
+        object? chestOverlay = Activator.CreateInstance(
+            chestOverlayType,
+            itemGrabMenu,
+            chest,
+            config,
+            chestDataManager,
+            chestFiller,
+            itemDataManager,
+            tooltipManager
+        );
+        if (chestOverlay is null)
+        {
+            return;
+        }
+
+        MethodInfo? addChildMethod = rootWidget.GetType()
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(method => method.Name == "AddChild" && method.IsGenericMethodDefinition);
+        if (addChildMethod is null)
+        {
+            return;
+        }
+
+        addChildMethod.MakeGenericMethod(chestOverlayType).Invoke(rootWidget, new[] { chestOverlay });
+        if (widgetHostField is not null)
+        {
+            widgetHostField.SetValue(__instance, widgetHost);
+        }
+    }
+
+    internal static void CategorizeChests_OpenCategoryMenu_Postfix(object __instance)
+    {
+        categorizeChestsOverlayCategoryMenuField ??= AccessTools.Field(__instance.GetType(), "CategoryMenu");
+        if (categorizeChestsOverlayCategoryMenuField?.GetValue(__instance) is not object categoryMenu)
+        {
+            return;
+        }
+
+        OffsetCategorizeChestsWidgetPosition(categoryMenu, ModEntry.GetCategorizeChestsXOffset(), ModEntry.GetCategorizeChestsYOffset());
+    }
+
+    internal static void RemoteFridgeStorage_UpdateButtonPosition_Postfix(object __instance)
+    {
+        Traverse controller = Traverse.Create(__instance);
+        if (controller.Field("_openChest").GetValue() is not Chest chest
+            || Game1.activeClickableMenu is not ItemGrabMenu menu)
+        {
+            return;
+        }
+
+        int targetX = menu.xPositionOnScreen - Game1.pixelZoom * 16 * 2 + Game1.pixelZoom + ModEntry.GetRemoteFridgeStorageXOffset();
+        int targetY = menu.yPositionOnScreen + Game1.pixelZoom + ModEntry.GetRemoteFridgeStorageYOffset();
+
+        if (controller.Field("_fridgeSelected").GetValue() is ClickableTextureComponent selected)
+        {
+            selected.bounds.X = targetX;
+            selected.bounds.Y = targetY;
+        }
+
+        if (controller.Field("_fridgeDeselected").GetValue() is ClickableTextureComponent deselected)
+        {
+            deselected.bounds.X = targetX;
+            deselected.bounds.Y = targetY;
+        }
+    }
+
+    internal static bool RemoteFridgeStorage_DrawFridgeIcon_Prefix(object __instance, RenderedActiveMenuEventArgs e)
+    {
+        Traverse controller = Traverse.Create(__instance);
+        if (controller.Field("_openChest").GetValue() is not Chest openChest)
+        {
+            return false;
+        }
+
+        FarmHouse? farmHouse = Game1.getLocationFromName("farmHouse") as FarmHouse;
+        if (openChest == farmHouse?.fridge.Value
+            || Game1.activeClickableMenu is null
+            || !openChest.playerChest.Value)
+        {
+            return false;
+        }
+
+        controller.Method("UpdateButtonPosition", e).GetValue();
+        if (controller.Field("_chests").GetValue() is System.Collections.IEnumerable selectedChests
+            && ContainsReference(selectedChests, openChest))
+        {
+            if (controller.Field("_fridgeSelected").GetValue() is ClickableTextureComponent selected)
+            {
+                selected.draw(e.SpriteBatch, Color.White, 10f);
+            }
+        }
+        else if (controller.Field("_fridgeDeselected").GetValue() is ClickableTextureComponent deselected)
+        {
+            deselected.draw(e.SpriteBatch, Color.White, 10f);
+        }
+
+        if (!Game1.options.hardwareCursor)
+        {
+            Game1.spriteBatch.Draw(
+                Game1.mouseCursors,
+                new Vector2(Game1.getOldMouseX(), Game1.getOldMouseY()),
+                Game1.getSourceRectForStandardTileSheet(Game1.mouseCursors, 0, 16, 16),
+                Color.White,
+                0f,
+                Vector2.Zero,
+                4f + Game1.dialogueButtonScale / 150f,
+                SpriteEffects.None,
+                0f
+            );
+        }
+
+        return false;
+    }
+
+    private static void SetWidgetPosition(object widget, int x, int y)
+    {
+        convenientChestsWidgetPositionProperty ??= AccessTools.Property(
+            AccessTools.TypeByName("ConvenientChests.CategorizeChests.Interface.Widgets.Widget"),
+            "Position"
+        );
+
+        PropertyInfo? positionProperty = convenientChestsWidgetPositionProperty;
+        if (positionProperty is null)
+        {
+            return;
+        }
+
+        positionProperty.SetValue(widget, new Point(x, y));
+    }
+
+    private static Point? GetWidgetPosition(object widget)
+    {
+        convenientChestsWidgetPositionProperty ??= AccessTools.Property(
+            AccessTools.TypeByName("ConvenientChests.CategorizeChests.Interface.Widgets.Widget"),
+            "Position"
+        );
+
+        return convenientChestsWidgetPositionProperty?.GetValue(widget) is Point position
+            ? position
+            : null;
+    }
+
+    private static int GetWidgetWidth(object widget)
+    {
+        PropertyInfo? widthProperty = AccessTools.Property(
+            AccessTools.TypeByName("ConvenientChests.CategorizeChests.Interface.Widgets.Widget"),
+            "Width"
+        );
+
+        return widthProperty?.GetValue(widget) is int width
+            ? width
+            : 0;
+    }
+
+    private static int GetWidgetHeight(object widget)
+    {
+        PropertyInfo? heightProperty = AccessTools.Property(
+            AccessTools.TypeByName("ConvenientChests.CategorizeChests.Interface.Widgets.Widget"),
+            "Height"
+        );
+
+        return heightProperty?.GetValue(widget) is int height
+            ? height
+            : 0;
+    }
+
+    private static void OffsetCategorizeChestsWidgetPosition(object widget, int xOffset, int yOffset)
+    {
+        categorizeChestsWidgetPositionProperty ??= AccessTools.Property(
+            AccessTools.TypeByName("StardewValleyMods.CategorizeChests.Interface.Widgets.Widget"),
+            "Position"
+        );
+
+        if (categorizeChestsWidgetPositionProperty?.GetValue(widget) is not Point position)
+        {
+            return;
+        }
+
+        categorizeChestsWidgetPositionProperty.SetValue(widget, new Point(position.X + xOffset, position.Y + yOffset));
+    }
+
+    private static bool ContainsReference(System.Collections.IEnumerable values, object target)
+    {
+        foreach (object? value in values)
+        {
+            if (ReferenceEquals(value, target))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Chest? ResolveCategorizeChestsChest(ItemGrabMenu menu)
+    {
+        object? target = ((Delegate?)(object?)menu.behaviorOnItemGrab)?.Target;
+        if (target is Chest behaviorTargetChest)
+        {
+            return behaviorTargetChest;
+        }
+
+        if (menu.sourceItem is Chest sourceChest)
+        {
+            return sourceChest;
+        }
+
+        return menu.context as Chest;
+    }
+
+    private static void OffsetWidgetPosition(object widget, int xOffset, int yOffset)
+    {
+        convenientChestsWidgetPositionProperty ??= AccessTools.Property(
+            AccessTools.TypeByName("ConvenientChests.CategorizeChests.Interface.Widgets.Widget"),
+            "Position"
+        );
+
+        PropertyInfo? positionProperty = convenientChestsWidgetPositionProperty;
+        if (positionProperty?.GetValue(widget) is not Point position)
+        {
+            return;
+        }
+
+        SetWidgetPosition(widget, position.X + xOffset, position.Y + yOffset);
+    }
+
+    private static void RefreshConvenientChestsOverlayForMenu(ItemGrabMenu menu, Chest chest)
+    {
+        if (activeConvenientChestsOverlay is null)
+        {
+            return;
+        }
+
+        convenientChestsOverlayItemGrabMenuField ??= AccessTools.Field(activeConvenientChestsOverlay.GetType(), "<ItemGrabMenu>k__BackingField");
+        if (convenientChestsOverlayItemGrabMenuField?.GetValue(activeConvenientChestsOverlay) is not ItemGrabMenu overlayMenu
+            || !ReferenceEquals(overlayMenu, menu))
+        {
+            return;
+        }
+
+        convenientChestsOverlayChestField ??= AccessTools.Field(activeConvenientChestsOverlay.GetType(), "<Chest>k__BackingField");
+        convenientChestsOverlayChestField?.SetValue(activeConvenientChestsOverlay, chest);
+        Traverse.Create(activeConvenientChestsOverlay).Method("PositionButtons").GetValue();
+        ConvenientChests_PositionButtons_Postfix(activeConvenientChestsOverlay);
+        ConvenientChests_OpenCategoryMenu_Postfix(activeConvenientChestsOverlay);
     }
 
     internal static void InitUnlimitedStorageCompat()

@@ -24,5 +24,18 @@ public interface IGenericModConfigMenuApi
         string? fieldId = null
     );
 
+    void AddBoolOption(
+        IManifest mod,
+        Func<bool> getValue,
+        Action<bool> setValue,
+        Func<string>? name = null,
+        Func<string>? tooltip = null,
+        string? fieldId = null
+    );
+
+    void AddPage(IManifest mod, string pageId, Func<string>? pageTitle = null);
+
+    void AddPageLink(IManifest mod, string pageId, Func<string> text, Func<string>? tooltip = null);
+
     void OnFieldChanged(IManifest mod, Action<string, object> onChange);
 }
