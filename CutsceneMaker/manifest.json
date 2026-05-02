@@ -1,0 +1,13 @@
+{
+  "Name": "Cutscene Maker",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Adds a visual cutscene editor that exports Content Patcher event packs.",
+  "UniqueID": "Kree.CutsceneMaker",
+  "EntryDll": "CutsceneMaker.dll",
+  "MinimumApiVersion": "4.0.0",
+  "MinimumGameVersion": "1.6.0",
+  "UpdateKeys": [
+    "Nexus:YOUR_MOD_ID"
+  ]
+}

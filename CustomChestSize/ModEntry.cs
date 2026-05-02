@@ -1,5 +1,7 @@
 using HarmonyLib;
 using Microsoft.Xna.Framework;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
@@ -41,6 +43,8 @@ public sealed class ModEntry : Mod
     private const int MinMiniFridgeRows = 3;
     private const int MinJunimoChestColumns = 3;
     private const int MinJunimoChestRows = 3;
+    private const int MinAutoGrabberColumns = 12;
+    private const int MinAutoGrabberRows = 3;
     private const int MaxColumns = 24;
     private const int MaxRows = 12;
     private const int MinLayoutOffset = -200;
@@ -50,6 +54,8 @@ public sealed class ModEntry : Mod
     private const int MinColorPickerOffset = -1000;
     private const int MaxColorPickerOffset = 1000;
     private static readonly ConditionalWeakTable<ItemGrabMenu, ChestMenuLayoutState> LayoutStates = new();
+
+    private static readonly ConditionalWeakTable<Chest, StardewValley.Object?> AutoGrabberChests = new();
 
     internal void LogDebug(string message)
     {
@@ -90,6 +96,13 @@ public sealed class ModEntry : Mod
 
         this.harmony = new Harmony(this.ModManifest.UniqueID);
         this.harmony.PatchAll();
+
+        // Manually patch all ItemGrabMenu constructors — the attribute-based patch with
+        // MethodType.Constructor can't resolve in the Harmony version SMAPI bundles.
+        foreach (ConstructorInfo ctor in typeof(ItemGrabMenu).GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            this.harmony.Patch(ctor, postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.ItemGrabMenu_AnyConstructor_Postfix)));
+        }
 
         helper.ConsoleCommands.Add(
             "ccs_reload",
@@ -207,21 +220,12 @@ public sealed class ModEntry : Mod
         }
     }
 
-    internal static bool IsTintChestUIEnabled()
-    {
-        lock (ConfigLock)
-        {
-            return Instance.config.TintChestUI;
-        }
-    }
+    internal static volatile bool CachedTintChestUI;
+    internal static volatile int CachedTintChestUIOpacity;
 
-    internal static int GetTintChestUIOpacity()
-    {
-        lock (ConfigLock)
-        {
-            return Instance.config.TintChestUIOpacity;
-        }
-    }
+    internal static bool IsTintChestUIEnabled() => CachedTintChestUI;
+
+    internal static int GetTintChestUIOpacity() => CachedTintChestUIOpacity;
 
     internal static int GetTintChestUIPaddingLeft()
     {
@@ -503,6 +507,32 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
+            text: () => "Auto-Grabber",
+            tooltip: () => "Configure auto-grabber storage grid size."
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.AutoGrabberColumns,
+            setValue: this.SetAutoGrabberColumns,
+            name: () => "Columns",
+            tooltip: () => "How many slots each row has in an auto-grabber.",
+            min: MinAutoGrabberColumns,
+            max: MaxColumns,
+            interval: 1
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.AutoGrabberRows,
+            setValue: this.SetAutoGrabberRows,
+            name: () => "Rows",
+            tooltip: () => "How many rows an auto-grabber has.",
+            min: MinAutoGrabberRows,
+            max: MaxRows,
+            interval: 1
+        );
+
+        gmcm.AddSectionTitle(
+            this.ModManifest,
             text: () => "Layout tuning",
             tooltip: () => "Use these offsets to tune menu backgrounds in-game. Slot positions stay unchanged unless noted."
         );
@@ -642,6 +672,7 @@ public sealed class ModEntry : Mod
             this.SanitizeConfig();
             this.Helper.WriteConfig(this.config);
         }
+        this.CacheTintValues();
     }
 
     private void SaveConfig()
@@ -651,7 +682,7 @@ public sealed class ModEntry : Mod
             this.SanitizeConfig();
             this.Helper.WriteConfig(this.config);
         }
-
+        this.CacheTintValues();
         this.RefreshActiveChestMenu();
     }
 
@@ -661,8 +692,14 @@ public sealed class ModEntry : Mod
         {
             this.config = new ModConfig();
         }
-
+        this.CacheTintValues();
         this.SaveConfig();
+    }
+
+    private void CacheTintValues()
+    {
+        CachedTintChestUI = this.config.TintChestUI;
+        CachedTintChestUIOpacity = this.config.TintChestUIOpacity;
     }
 
     private bool TryGetConfiguredLayoutCore(Chest chest, out ChestGridLayout layout)
@@ -730,7 +767,35 @@ public sealed class ModEntry : Mod
 
     private void ApplyLayoutIfNeededCore(ItemGrabMenu menu)
     {
-        if (menu.source != ItemGrabMenu.source_chest || menu.sourceItem is not Chest chest)
+        // Auto-Grabber path: always check first regardless of source, since some
+        // menu reconstructions (e.g. shift-click transfer) use source_farmhand.
+        if (IsAutoGrabber(menu.sourceItem) || IsAutoGrabber(menu.context))
+        {
+            this.ApplyAutoGrabberLayout(menu);
+            return;
+        }
+
+        if (TryGetLayoutState(menu, out ChestMenuLayoutState existingState) && existingState.IsAutoGrabber)
+        {
+            this.ApplyAutoGrabberLayout(menu);
+            return;
+        }
+
+        // Fallback: when SDV reconstructs the menu (e.g. on item transfers), the new
+        // instance loses the auto-grabber as context. Check if the sourceItem is a
+        // chest we've previously identified as an auto-grabber's internal chest.
+        if (menu.sourceItem is Chest sourceChest && AutoGrabberChests.TryGetValue(sourceChest, out _))
+        {
+            this.ApplyAutoGrabberLayout(menu);
+            return;
+        }
+
+        if (menu.source != ItemGrabMenu.source_chest)
+        {
+            return;
+        }
+
+        if (menu.sourceItem is not Chest chest)
         {
             return;
         }
@@ -740,11 +805,9 @@ public sealed class ModEntry : Mod
             return;
         }
 
-        chest.clearNulls();
-
         int visibleRows = configuredLayout.Rows;
         int visibleCapacity = configuredLayout.Capacity;
-        int currentItemCount = chest.GetItemsForPlayer().Count;
+        int currentItemCount = chest.GetItemsForPlayer().Count(item => item is not null);
         bool unlimitedStorageLoaded = IsUnlimitedStorageLoaded();
 
         if (!unlimitedStorageLoaded && currentItemCount > visibleCapacity)
@@ -816,6 +879,8 @@ public sealed class ModEntry : Mod
         menu.RepositionSideButtons();
         menu.SetupBorderNeighbors();
         menu.populateClickableComponentList();
+        this.LogDebug($"[ApplyLayout] chest={menu.ItemsToGrabMenu.rows}x{menu.ItemsToGrabMenu.inventory.Count / menu.ItemsToGrabMenu.rows} slots={menu.ItemsToGrabMenu.inventory.Count} inv={menu.inventory.inventory.Count} total={menu.allClickableComponents?.Count ?? 0}");
+
         this.SetLayoutState(menu, new ChestMenuLayoutState(chestPanelTop, chestPanelTop)
         {
             ChestPanelBounds = new Rectangle(
@@ -826,11 +891,155 @@ public sealed class ModEntry : Mod
             )
         });
         this.ReanchorColorPickerStripCore(menu, chestPanelTop);
+    }
 
-        if (Game1.options.SnappyMenus)
+    private void ApplyAutoGrabberLayout(ItemGrabMenu menu)
+    {
+        int cols;
+        int rows;
+        lock (ConfigLock)
         {
-            menu.snapToDefaultClickableComponent();
+            cols = this.config.AutoGrabberColumns;
+            rows = this.config.AutoGrabberRows;
         }
+
+        IList<Item> items = menu.ItemsToGrabMenu.actualInventory;
+        int itemCount = items.Count(item => item is not null);
+        int visibleRows = rows;
+        int visibleCapacity = cols * rows;
+
+        if (itemCount > visibleCapacity)
+        {
+            visibleRows = (itemCount + cols - 1) / cols;
+            visibleCapacity = visibleRows * cols;
+        }
+
+        int menuWidth = System.Math.Max(
+            DefaultMenuWidth,
+            cols * 64 + (IClickableMenu.borderWidth + IClickableMenu.spaceToClearSideBorder) * 2
+        );
+        int chestMenuHeight = this.GetChestMenuHeight(visibleRows);
+        int chestPanelHeight = chestMenuHeight + IClickableMenu.spaceToClearTopBorder + IClickableMenu.borderWidth * 2;
+        int assemblyHeight = chestPanelHeight + PanelGap + LowerPanelHeight;
+        int menuX = Game1.uiViewport.Width / 2 - menuWidth / 2;
+        int chestPanelTop = System.Math.Max(16, (Game1.uiViewport.Height - assemblyHeight) / 2);
+        int lowerPanelTop = chestPanelTop + chestPanelHeight + PanelGap + this.config.InventoryPanelGapOffset;
+        int chestX = menuX + InventoryHorizontalInset;
+        int chestY = chestPanelTop + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder;
+        int lowerPanelLeft = menuX - IClickableMenu.borderWidth / 2;
+        int inventoryX = lowerPanelLeft + (menuWidth - menu.inventory.width) / 2;
+        int inventoryY = lowerPanelTop + LowerInventoryTopPadding + PlayerInventoryFirstRowLift;
+
+        menu.xPositionOnScreen = menuX;
+        menu.yPositionOnScreen = lowerPanelTop - LowerPanelTopOffset;
+        menu.width = menuWidth;
+        menu.height = LowerPanelHeight + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 192;
+        menu.ItemsToGrabMenu = new InventoryMenu(
+            chestX, chestY,
+            playerInventory: false,
+            items,
+            menu.inventory.highlightMethod,
+            visibleCapacity, visibleRows
+        );
+        menu.ItemsToGrabMenu.height = chestMenuHeight;
+
+        menu.inventory.SetPosition(inventoryX, inventoryY);
+        this.RepositionLowerPanel(menu);
+        menu.storageSpaceTopBorderOffset = 0;
+
+        if (menu.trashCan is not null)
+        {
+            menu.trashCan.bounds.X = menu.ItemsToGrabMenu.xPositionOnScreen + menu.ItemsToGrabMenu.width + IClickableMenu.borderWidth * 2;
+            menu.trashCan.bounds.Y = menu.yPositionOnScreen + menu.height - 192 - 32 - IClickableMenu.borderWidth - 104;
+        }
+
+        if (menu.okButton is not null)
+        {
+            menu.okButton.bounds.X = menu.ItemsToGrabMenu.xPositionOnScreen + menu.ItemsToGrabMenu.width + IClickableMenu.borderWidth * 2;
+            menu.okButton.bounds.Y = menu.yPositionOnScreen + menu.height - 192 - IClickableMenu.borderWidth;
+        }
+
+        if (menu.dropItemInvisibleButton is not null)
+        {
+            menu.dropItemInvisibleButton.bounds.X = menu.inventory.xPositionOnScreen - IClickableMenu.borderWidth - IClickableMenu.spaceToClearSideBorder - 128;
+            menu.dropItemInvisibleButton.bounds.Y = menu.inventory.yPositionOnScreen - 12;
+        }
+
+        this.PrepareChestClickableComponents(menu);
+        menu.RepositionSideButtons();
+        menu.SetupBorderNeighbors();
+        menu.populateClickableComponentList();
+        this.SetLayoutState(menu, new ChestMenuLayoutState(chestPanelTop, chestPanelTop)
+        {
+            ChestPanelBounds = new Rectangle(
+                menu.ItemsToGrabMenu.xPositionOnScreen,
+                menu.ItemsToGrabMenu.yPositionOnScreen,
+                menu.ItemsToGrabMenu.width,
+                menu.ItemsToGrabMenu.height
+            ),
+            IsAutoGrabber = true
+        });
+        this.ReanchorColorPickerStripCore(menu, chestPanelTop);
+
+        // Track the internal chest so reconstructed menus can still identify
+        // this as an auto-grabber layout.
+        StardewValley.Object? grabber = menu.context as StardewValley.Object ?? menu.sourceItem as StardewValley.Object;
+        if (grabber?.ItemId == "165" && grabber.heldObject.Value is Chest internalChest)
+        {
+            AutoGrabberChests.GetValue(internalChest, _ => grabber);
+        }
+
+        // Restore auto-grabber menu identity if it was lost during reconstruction.
+        // Chest.ShowMenu() sets context=chest which breaks other mods' detection.
+        if (menu.context is not StardewValley.Object ctxObj || ctxObj.ItemId != "165")
+        {
+            RestoreAutoGrabberMenuIdentity(menu);
+        }
+
+        // Remove color picker — ShowMenu() creates one when sourceItem is a Chest
+        menu.chestColorPicker = null;
+        menu.colorPickerToggleButton = null;
+
+        if (IsUnlimitedStorageLoaded())
+        {
+            Patches.ApplyUnlimitedStorageLayout(menu);
+        }
+    }
+
+    private static void RestoreAutoGrabberMenuIdentity(ItemGrabMenu menu)
+    {
+        Chest? internalChest = menu.sourceItem as Chest ?? menu.context as Chest;
+        if (internalChest is null || !AutoGrabberChests.TryGetValue(internalChest, out StardewValley.Object? grabber) || grabber is null)
+        {
+            return;
+        }
+
+        // Restore context so other mods see this as an auto-grabber
+        menu.context = grabber;
+
+        // Restore behaviorOnItemGrab so taking items out uses auto-grabber logic
+        MethodInfo? grabMethod = AccessTools.Method(typeof(StardewValley.Object), "grabItemFromAutoGrabber");
+        if (grabMethod is not null)
+        {
+            menu.behaviorOnItemGrab = (ItemGrabMenu.behaviorOnItemSelect)
+                Delegate.CreateDelegate(typeof(ItemGrabMenu.behaviorOnItemSelect), grabber, grabMethod);
+        }
+
+        // Ensure sourceItem points to the auto-grabber, not the internal chest
+        if (menu.sourceItem is not StardewValley.Object obj || obj.ItemId != "165")
+        {
+            menu.sourceItem = grabber;
+        }
+    }
+
+    private static int SafeAdd(int value, int addend)
+    {
+        int result = value + addend;
+        if (addend > 0 && result < value)
+            return int.MaxValue;
+        if (addend < 0 && result > value)
+            return int.MinValue;
+        return result;
     }
 
     private void PrepareChestClickableComponents(ItemGrabMenu menu)
@@ -839,12 +1048,11 @@ public sealed class ModEntry : Mod
 
         foreach (ClickableComponent component in menu.ItemsToGrabMenu.inventory)
         {
-            component.myID += ItemGrabMenu.region_itemsToGrabMenuModifier;
-            component.upNeighborID += ItemGrabMenu.region_itemsToGrabMenuModifier;
-            component.rightNeighborID += ItemGrabMenu.region_itemsToGrabMenuModifier;
-            component.leftNeighborID += ItemGrabMenu.region_itemsToGrabMenuModifier;
-            component.downNeighborID = -7777;
-            component.fullyImmutable = true;
+            component.myID = SafeAdd(component.myID, ItemGrabMenu.region_itemsToGrabMenuModifier);
+            component.upNeighborID = SafeAdd(component.upNeighborID, ItemGrabMenu.region_itemsToGrabMenuModifier);
+            component.rightNeighborID = SafeAdd(component.rightNeighborID, ItemGrabMenu.region_itemsToGrabMenuModifier);
+            component.leftNeighborID = SafeAdd(component.leftNeighborID, ItemGrabMenu.region_itemsToGrabMenuModifier);
+            component.downNeighborID = SafeAdd(component.downNeighborID, ItemGrabMenu.region_itemsToGrabMenuModifier);
         }
     }
 
@@ -959,6 +1167,8 @@ public sealed class ModEntry : Mod
         this.config.MiniFridgeRows = this.Clamp(this.config.MiniFridgeRows, MinMiniFridgeRows, MaxRows, nameof(this.config.MiniFridgeRows));
         this.config.JunimoChestColumns = this.Clamp(this.config.JunimoChestColumns, MinJunimoChestColumns, MaxColumns, nameof(this.config.JunimoChestColumns));
         this.config.JunimoChestRows = this.Clamp(this.config.JunimoChestRows, MinJunimoChestRows, MaxRows, nameof(this.config.JunimoChestRows));
+        this.config.AutoGrabberColumns = this.Clamp(this.config.AutoGrabberColumns, MinAutoGrabberColumns, MaxColumns, nameof(this.config.AutoGrabberColumns));
+        this.config.AutoGrabberRows = this.Clamp(this.config.AutoGrabberRows, MinAutoGrabberRows, MaxRows, nameof(this.config.AutoGrabberRows));
         this.config.ChestBackgroundHeightOffset = this.Clamp(this.config.ChestBackgroundHeightOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.ChestBackgroundHeightOffset));
         this.config.InventoryPanelGapOffset = this.Clamp(this.config.InventoryPanelGapOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.InventoryPanelGapOffset));
         this.config.InventoryBackgroundTopOffset = this.Clamp(this.config.InventoryBackgroundTopOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.InventoryBackgroundTopOffset));
@@ -1093,6 +1303,22 @@ public sealed class ModEntry : Mod
         lock (ConfigLock)
         {
             this.config.JunimoChestRows = value;
+        }
+    }
+
+    private void SetAutoGrabberColumns(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.AutoGrabberColumns = value;
+        }
+    }
+
+    private void SetAutoGrabberRows(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.AutoGrabberRows = value;
         }
     }
 
@@ -1259,7 +1485,7 @@ public sealed class ModEntry : Mod
         {
             this.harmony.Patch(
                 onRenderedActiveMenuMethod,
-                prefix: new HarmonyMethod(typeof(Patches), nameof(Patches.UnlimitedStorage_OnRenderedActiveMenu_Prefix))
+                postfix: new HarmonyMethod(typeof(Patches), nameof(Patches.UnlimitedStorage_OnRenderedActiveMenu_Postfix))
             );
         }
 
@@ -1271,6 +1497,11 @@ public sealed class ModEntry : Mod
                 prefix: new HarmonyMethod(typeof(Patches), nameof(Patches.TextBox_Hover_Prefix))
             );
         }
+    }
+
+    internal static bool IsAutoGrabber(object? target)
+    {
+        return target is StardewValley.Object obj && obj.ItemId == "165";
     }
 
     internal static bool TryGetLayoutState(ItemGrabMenu menu, out ChestMenuLayoutState state)

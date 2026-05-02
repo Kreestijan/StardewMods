@@ -25,6 +25,9 @@ internal static class Patches
     [ThreadStatic]
     private static int suppressCustomCapacityDepth;
 
+    [ThreadStatic]
+    private static ItemGrabMenu? activeTintMenu;
+
     private static PropertyInfo? usTextBoxProperty;
     private static FieldInfo? textBoxClickableComponentField;
     private static PropertyInfo? convenientChestsWidgetPositionProperty;
@@ -38,12 +41,18 @@ internal static class Patches
     private static FieldInfo? categorizeChestsOverlayStashButtonField;
     private static FieldInfo? categorizeChestsOverlayCategoryMenuField;
     private static object? activeConvenientChestsOverlay;
+    private static MethodInfo? convenientChestsPositionMethod;
+    private static FieldInfo? rfsOpenChestField;
+    private static MethodInfo? rfsUpdateButtonMethod;
+    private static FieldInfo? rfsChestsField;
+    private static FieldInfo? rfsSelectedField;
+    private static FieldInfo? rfsDeselectedField;
 
     [HarmonyPostfix]
     [HarmonyPatch(typeof(Chest), nameof(Chest.GetActualCapacity))]
     private static void Chest_GetActualCapacity_Postfix(Chest __instance, ref int __result)
     {
-        if (suppressCustomCapacityDepth <= 0 && !ModEntry.IsUnlimitedStorageLoaded())
+        if (suppressCustomCapacityDepth <= 0 && !ModEntry.IsUnlimitedStorageLoaded() && Game1.gameMode == 3)
         {
             __result = ModEntry.GetConfiguredCapacity(__instance, __result);
         }
@@ -159,6 +168,66 @@ internal static class Patches
         ModEntry.ApplyLayoutIfNeeded(__instance);
     }
 
+    internal static void ItemGrabMenu_AnyConstructor_Postfix(ItemGrabMenu __instance)
+    {
+        ModEntry.ApplyLayoutIfNeeded(__instance);
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPriority(Priority.First)]
+    [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.setSourceItem))]
+    private static void ItemGrabMenu_SetSourceItem_Prefix(ItemGrabMenu __instance, out object? __state)
+    {
+        __state = __instance.sourceItem;
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPriority(Priority.Last)]
+    [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.setSourceItem))]
+    private static void ItemGrabMenu_SetSourceItem_Postfix(ItemGrabMenu __instance, StardewValley.Item item, object? __state)
+    {
+        // Auto-grabber: the game's setSourceItem reconstructs ItemsToGrabMenu with
+        // vanilla defaults, so always re-apply the auto grabber layout regardless
+        // of the source value (some mods use source_farmhand for item transfers).
+        if (ModEntry.IsAutoGrabber(item) || ModEntry.IsAutoGrabber(__instance.context))
+        {
+            ModEntry.ApplyLayoutIfNeeded(__instance);
+            return;
+        }
+
+        if (__instance.source != ItemGrabMenu.source_chest)
+        {
+            return;
+        }
+
+        if (item is not Chest)
+        {
+            return;
+        }
+
+        // Always re-anchor the color picker — it may have been created lazily after the initial layout
+        ModEntry.ReanchorColorPickerStrip(__instance);
+
+        // Skip full layout rebuild if the source chest hasn't actually changed —
+        // some mods call setSourceItem on item transfers, and rebuilding 300+
+        // clickable components per click causes visible stutter.
+        if (__state is Chest oldChest && ReferenceEquals(oldChest, item))
+        {
+            return;
+        }
+
+        ModEntry.ApplyLayoutIfNeeded(__instance);
+
+        // Update CC's chest reference without running PositionButtons (expensive with
+        // large grids). The button positions don't change on item transfers — only the
+        // chest content does. CC draws the chest name etc from this reference.
+        UpdateConvenientChestsChest(__instance, (Chest)item);
+        if (ModEntry.TryGetLayoutState(__instance, out ChestMenuLayoutState ccState))
+        {
+            ccState.ConvenientChestsPositioned = true;
+        }
+    }
+
     [HarmonyPostfix]
     [HarmonyPriority(Priority.Last)]
     [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.gameWindowSizeChanged))]
@@ -167,61 +236,61 @@ internal static class Patches
         ModEntry.ApplyLayoutIfNeeded(__instance);
     }
 
-    [HarmonyPostfix]
-    [HarmonyPriority(Priority.Last)]
-    [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.setSourceItem))]
-    private static void ItemGrabMenu_SetSourceItem_Postfix(ItemGrabMenu __instance, StardewValley.Item item)
+    [HarmonyPrefix]
+    [HarmonyPriority(Priority.First)]
+    [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.draw))]
+    private static void ItemGrabMenu_Draw_Prefix(ItemGrabMenu __instance)
     {
-        if (__instance.source != ItemGrabMenu.source_chest || item is not Chest)
-        {
-            return;
-        }
-
-        ModEntry.ApplyLayoutIfNeeded(__instance);
-        ModEntry.ReanchorColorPickerStrip(__instance);
-        RefreshConvenientChestsOverlayForMenu(__instance, (Chest)item);
+        activeTintMenu = ModEntry.IsTintChestUIEnabled() ? __instance : null;
     }
 
     [HarmonyPostfix]
     [HarmonyPriority(Priority.Last)]
     [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.draw))]
-    private static void ItemGrabMenu_Draw_Postfix(ItemGrabMenu __instance, SpriteBatch b)
+    private static void ItemGrabMenu_Draw_Postfix()
     {
-        if (!ModEntry.TryGetLayoutState(__instance, out ChestMenuLayoutState state))
-            return;
+        activeTintMenu = null;
+    }
 
-        if (!ModEntry.IsTintChestUIEnabled())
-            return;
+    [HarmonyPrefix]
+    [HarmonyPriority(Priority.Last)]
+    [HarmonyPatch(typeof(InventoryMenu), nameof(InventoryMenu.draw), typeof(SpriteBatch))]
+    private static bool InventoryMenu_Draw_Prefix(InventoryMenu __instance, SpriteBatch b)
+    {
+        if (activeTintMenu is null)
+            return true;
 
-        int opacity = ModEntry.GetTintChestUIOpacity();
-        if (opacity <= 0)
-            return;
+        if (__instance != activeTintMenu.ItemsToGrabMenu)
+            return true;
 
-        // Read the chest color live at draw time so color picker changes take effect immediately
-        if (__instance.sourceItem is not Chest chest)
-            return;
+        if (activeTintMenu.sourceItem is not Chest chest)
+            return true;
 
         Color choiceColor = chest.playerChoiceColor.Value;
-        // No color selected: RGB values are all zero (black) or white
         if (choiceColor.R == 0 && choiceColor.G == 0 && choiceColor.B == 0)
-            return;
+            return true;
         if (choiceColor == Color.White)
-            return;
+            return true;
+
+        if (!ModEntry.TryGetLayoutState(activeTintMenu, out ChestMenuLayoutState state))
+            return true;
 
         Rectangle bounds = state.ChestPanelBounds;
         if (bounds.Width <= 0 || bounds.Height <= 0)
-            return;
+            return true;
 
-        // Apply per-side padding
+        int opacity = ModEntry.GetTintChestUIOpacity();
+        if (opacity <= 0)
+            return true;
+
         bounds.X += ModEntry.GetTintChestUIPaddingLeft();
         bounds.Width -= ModEntry.GetTintChestUIPaddingLeft() + ModEntry.GetTintChestUIPaddingRight();
         bounds.Y += ModEntry.GetTintChestUIPaddingTop();
         bounds.Height -= ModEntry.GetTintChestUIPaddingTop() + ModEntry.GetTintChestUIPaddingBottom();
 
         if (bounds.Width <= 0 || bounds.Height <= 0)
-            return;
+            return true;
 
-        // Blend the chest color into full white at the configured opacity (no alpha transparency)
         float t = opacity / 100f;
         Color tintColor = new Color(
             (byte)(255 - (255 - choiceColor.R) * t),
@@ -229,11 +298,9 @@ internal static class Patches
             (byte)(255 - (255 - choiceColor.B) * t)
         );
 
-        // Redraw the chest panel background using the uncolored menu texture tinted with the chest color
         IClickableMenu.drawTextureBox(b, Game1.uncoloredMenuTexture, new Rectangle(0, 256, 64, 64), bounds.X, bounds.Y, bounds.Width, bounds.Height, tintColor, 1f, false);
 
-        // Redraw the chest items on top so they're not buried under the tinted background
-        __instance.ItemsToGrabMenu.draw(b);
+        return true;
     }
 
     internal static void ChestsAnywhere_ReinitializeBaseComponents_Postfix(object __instance)
@@ -299,11 +366,23 @@ internal static class Patches
             return;
         }
 
+        // Skip per-frame work if already positioned for this layout
+        if (ModEntry.TryGetLayoutState(menu, out ChestMenuLayoutState ccState) && ccState.ConvenientChestsPositioned)
+        {
+            return;
+        }
+
         activeConvenientChestsOverlay = __instance;
         convenientChestsOverlayChestField ??= AccessTools.Field(__instance.GetType(), "<Chest>k__BackingField");
         convenientChestsOverlayChestField?.SetValue(__instance, chest);
-        Traverse.Create(__instance).Method("PositionButtons").GetValue();
+        convenientChestsPositionMethod ??= AccessTools.Method(__instance.GetType(), "PositionButtons");
+        convenientChestsPositionMethod?.Invoke(__instance, null);
         ConvenientChests_PositionButtons_Postfix(__instance);
+
+        if (ccState is not null)
+        {
+            ccState.ConvenientChestsPositioned = true;
+        }
     }
 
     internal static void ConvenientChests_PositionButtons_Postfix(object __instance)
@@ -464,23 +543,29 @@ internal static class Patches
 
     internal static void RemoteFridgeStorage_UpdateButtonPosition_Postfix(object __instance)
     {
-        Traverse controller = Traverse.Create(__instance);
-        if (controller.Field("_openChest").GetValue() is not Chest chest
-            || Game1.activeClickableMenu is not ItemGrabMenu menu)
+        if (Game1.activeClickableMenu is not ItemGrabMenu menu)
         {
             return;
         }
 
+        Type t = __instance.GetType();
+        rfsOpenChestField ??= AccessTools.Field(t, "_openChest");
+        rfsSelectedField ??= AccessTools.Field(t, "_fridgeSelected");
+        rfsDeselectedField ??= AccessTools.Field(t, "_fridgeDeselected");
+
+        if (rfsOpenChestField?.GetValue(__instance) is not Chest chest)
+            return;
+
         int targetX = menu.xPositionOnScreen - Game1.pixelZoom * 16 * 2 + Game1.pixelZoom + ModEntry.GetRemoteFridgeStorageXOffset();
         int targetY = menu.yPositionOnScreen + Game1.pixelZoom + ModEntry.GetRemoteFridgeStorageYOffset();
 
-        if (controller.Field("_fridgeSelected").GetValue() is ClickableTextureComponent selected)
+        if (rfsSelectedField?.GetValue(__instance) is ClickableTextureComponent selected)
         {
             selected.bounds.X = targetX;
             selected.bounds.Y = targetY;
         }
 
-        if (controller.Field("_fridgeDeselected").GetValue() is ClickableTextureComponent deselected)
+        if (rfsDeselectedField?.GetValue(__instance) is ClickableTextureComponent deselected)
         {
             deselected.bounds.X = targetX;
             deselected.bounds.Y = targetY;
@@ -489,8 +574,14 @@ internal static class Patches
 
     internal static bool RemoteFridgeStorage_DrawFridgeIcon_Prefix(object __instance, RenderedActiveMenuEventArgs e)
     {
-        Traverse controller = Traverse.Create(__instance);
-        if (controller.Field("_openChest").GetValue() is not Chest openChest)
+        Type t = __instance.GetType();
+        rfsOpenChestField ??= AccessTools.Field(t, "_openChest");
+        rfsUpdateButtonMethod ??= AccessTools.Method(t, "UpdateButtonPosition");
+        rfsChestsField ??= AccessTools.Field(t, "_chests");
+        rfsSelectedField ??= AccessTools.Field(t, "_fridgeSelected");
+        rfsDeselectedField ??= AccessTools.Field(t, "_fridgeDeselected");
+
+        if (rfsOpenChestField?.GetValue(__instance) is not Chest openChest)
         {
             return false;
         }
@@ -503,16 +594,16 @@ internal static class Patches
             return false;
         }
 
-        controller.Method("UpdateButtonPosition", e).GetValue();
-        if (controller.Field("_chests").GetValue() is System.Collections.IEnumerable selectedChests
+        rfsUpdateButtonMethod?.Invoke(__instance, new object[] { e });
+        if (rfsChestsField?.GetValue(__instance) is System.Collections.IEnumerable selectedChests
             && ContainsReference(selectedChests, openChest))
         {
-            if (controller.Field("_fridgeSelected").GetValue() is ClickableTextureComponent selected)
+            if (rfsSelectedField?.GetValue(__instance) is ClickableTextureComponent selected)
             {
                 selected.draw(e.SpriteBatch, Color.White, 10f);
             }
         }
-        else if (controller.Field("_fridgeDeselected").GetValue() is ClickableTextureComponent deselected)
+        else if (rfsDeselectedField?.GetValue(__instance) is ClickableTextureComponent deselected)
         {
             deselected.draw(e.SpriteBatch, Color.White, 10f);
         }
@@ -647,6 +738,20 @@ internal static class Patches
         SetWidgetPosition(widget, position.X + xOffset, position.Y + yOffset);
     }
 
+    private static void UpdateConvenientChestsChest(ItemGrabMenu menu, Chest chest)
+    {
+        if (activeConvenientChestsOverlay is null)
+            return;
+
+        convenientChestsOverlayItemGrabMenuField ??= AccessTools.Field(activeConvenientChestsOverlay.GetType(), "<ItemGrabMenu>k__BackingField");
+        if (convenientChestsOverlayItemGrabMenuField?.GetValue(activeConvenientChestsOverlay) is not ItemGrabMenu overlayMenu
+            || !ReferenceEquals(overlayMenu, menu))
+            return;
+
+        convenientChestsOverlayChestField ??= AccessTools.Field(activeConvenientChestsOverlay.GetType(), "<Chest>k__BackingField");
+        convenientChestsOverlayChestField?.SetValue(activeConvenientChestsOverlay, chest);
+    }
+
     private static void RefreshConvenientChestsOverlayForMenu(ItemGrabMenu menu, Chest chest)
     {
         if (activeConvenientChestsOverlay is null)
@@ -663,9 +768,16 @@ internal static class Patches
 
         convenientChestsOverlayChestField ??= AccessTools.Field(activeConvenientChestsOverlay.GetType(), "<Chest>k__BackingField");
         convenientChestsOverlayChestField?.SetValue(activeConvenientChestsOverlay, chest);
-        Traverse.Create(activeConvenientChestsOverlay).Method("PositionButtons").GetValue();
+        convenientChestsPositionMethod ??= AccessTools.Method(activeConvenientChestsOverlay.GetType(), "PositionButtons");
+        convenientChestsPositionMethod?.Invoke(activeConvenientChestsOverlay, null);
         ConvenientChests_PositionButtons_Postfix(activeConvenientChestsOverlay);
         ConvenientChests_OpenCategoryMenu_Postfix(activeConvenientChestsOverlay);
+
+        // Mark as positioned so the per-frame draw prefix skips next frame
+        if (ModEntry.TryGetLayoutState(menu, out ChestMenuLayoutState refreshState))
+        {
+            refreshState.ConvenientChestsPositioned = true;
+        }
     }
 
     internal static void InitUnlimitedStorageCompat()
@@ -735,10 +847,14 @@ internal static class Patches
         );
     }
 
-    internal static void UnlimitedStorage_OnRenderedActiveMenu_Prefix()
+    internal static void UnlimitedStorage_OnRenderedActiveMenu_Postfix()
     {
-        // Intentionally empty. Unlimited Storage recalculates Y inside this method,
-        // and we apply absolute Y in TextBox.Hover immediately before draw.
+        if (Game1.activeClickableMenu is ItemGrabMenu menu
+            && ModEntry.TryGetLayoutState(menu, out ChestMenuLayoutState state)
+            && state.IsAutoGrabber)
+        {
+            ApplyUnlimitedStorageLayout(menu);
+        }
     }
 
     internal static void TextBox_Hover_Prefix(TextBox __instance)

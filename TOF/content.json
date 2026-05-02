@@ -1,5 +1,5 @@
 {
-  "Format": "2.0.0",
+  "Format": "2.9.0",
   "ConfigSchema": {
     "EnableMirrorKoi": {
       "AllowValues": "true, false",

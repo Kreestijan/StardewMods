@@ -1,0 +1,8 @@
+{
+  "ThresholdMs": 100,
+  "ShowAllMods": false,
+  "LogOnStartup": true,
+  "OverlayKey": "K",
+  "OverlayTopN": 10,
+  "OverlaySampleWindow": 60
+}

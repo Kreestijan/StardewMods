@@ -1,0 +1,12 @@
+{
+  "Name": "Load Time Profiler",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Profiles mod load times at startup and measures per-mod draw/update costs at runtime with an in-game overlay.",
+  "UniqueID": "Kree.LoadTimeProfiler",
+  "EntryDll": "LoadTimeProfiler.dll",
+  "MinimumApiVersion": "4.0.0",
+  "Dependencies": [
+    { "UniqueID": "spacechase0.GenericModConfigMenu", "IsRequired": false }
+  ]
+}

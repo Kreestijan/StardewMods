@@ -6,6 +6,8 @@
   "UniqueID": "Kree.PetWhileSleeping",
   "EntryDll": "PetWhileSleeping.dll",
   "MinimumApiVersion": "4.0.0",
+    "UpdateKeys": [
+    "45143"
   "Dependencies": [
     {
       "UniqueID": "spacechase0.GenericModConfigMenu",

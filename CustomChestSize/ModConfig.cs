@@ -2,7 +2,7 @@ namespace CustomChestSize;
 
 internal sealed class ModConfig
 {
-    public int RegularChestColumns { get; set; } = 16;
+    public int RegularChestColumns { get; set; } = 17;
 
     public int RegularChestRows { get; set; } = 7;
 
@@ -10,25 +10,29 @@ internal sealed class ModConfig
 
     public int BigChestRows { get; set; } = 12;
 
-    public int StoneChestColumns { get; set; } = 14;
+    public int StoneChestColumns { get; set; } = 17;
 
-    public int StoneChestRows { get; set; } = 6;
+    public int StoneChestRows { get; set; } = 7;
 
     public int BigStoneChestColumns { get; set; } = 24;
 
     public int BigStoneChestRows { get; set; } = 12;
 
-    public int FridgeColumns { get; set; } = 14;
+    public int FridgeColumns { get; set; } = 24;
 
-    public int FridgeRows { get; set; } = 6;
+    public int FridgeRows { get; set; } = 12;
 
-    public int MiniFridgeColumns { get; set; } = 14;
+    public int MiniFridgeColumns { get; set; } = 24;
 
-    public int MiniFridgeRows { get; set; } = 6;
+    public int MiniFridgeRows { get; set; } = 12;
 
-    public int JunimoChestColumns { get; set; } = 12;
+    public int JunimoChestColumns { get; set; } = 17;
 
-    public int JunimoChestRows { get; set; } = 6;
+    public int JunimoChestRows { get; set; } = 7;
+
+    public int AutoGrabberColumns { get; set; } = 24;
+
+    public int AutoGrabberRows { get; set; } = 12;
 
     public int ChestBackgroundHeightOffset { get; set; }
 
@@ -42,7 +46,7 @@ internal sealed class ModConfig
 
     public int ChestsAnywhereWidgetYOffset { get; set; } = 28;
 
-    public int ConvenientChestsXOffset { get; set; } = -184;
+    public int ConvenientChestsXOffset { get; set; } = -304;
 
     public int ConvenientChestsYOffset { get; set; }
 

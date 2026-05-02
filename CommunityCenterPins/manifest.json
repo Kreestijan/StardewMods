@@ -1,0 +1,18 @@
+{
+  "Name": "Community Center Pins",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Lets you pin Community Center bundle requirements as draggable HUD overlays.",
+  "UniqueID": "Kree.CommunityCenterPins",
+  "EntryDll": "CommunityCenterPins.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": [
+    "Nexus:YOUR_MOD_ID"
+  ],
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
+}

@@ -23,4 +23,8 @@ internal sealed class ChestMenuLayoutState
     public int UnlimitedStorageSearchAppliedLeftOffset { get; set; }
 
     public int UnlimitedStorageSearchAppliedRightOffset { get; set; }
+
+    public bool ConvenientChestsPositioned { get; set; }
+
+    public bool IsAutoGrabber { get; set; }
 }
