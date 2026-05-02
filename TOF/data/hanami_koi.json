@@ -1,0 +1,133 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_hanami_koi": {
+          "Name": "Kree.TOF_hanami_koi",
+          "DisplayName": "{{i18n:hanami_koi.name}}",
+          "Description": "{{i18n:hanami_koi.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 500,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "6",
+          "Edibility": 15,
+          "ContextTags": [
+            "fish_has_roe",
+            "color_pink",
+            "season_spring",
+            "fish_river",
+            "fish_lake",
+            "fish_tof_hanami_koi"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_hanami_koi": "Hanami Koi/70/mixed/7/28/600 2600/spring/sunny/682 .2/1/0.15/0.15/4"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_hanami_koi": {
+          "Id": "tof_hanami_koi",
+          "RequiredTags": [
+            "fish_tof_hanami_koi"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "229 180 233",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 8,
+              "Chance": 0.08,
+              "ItemID": "(O)221",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 0,
+              "Chance": 0.3,
+              "ItemID": "(O)812",
+              "MinQuantity": 1,
+              "MaxQuantity": 5
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)495 5"
+            ],
+            "8": [
+              "(O)400 10"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Town",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Town_HanamiKoi": {
+          "Id": "Kree.TOF_Town_HanamiKoi",
+          "ItemId": "(O)Kree.TOF_hanami_koi",
+          "Season": "spring",
+          "Chance": 0.25,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Forest",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Forest_HanamiKoi": {
+          "Id": "Kree.TOF_Forest_HanamiKoi",
+          "ItemId": "(O)Kree.TOF_hanami_koi",
+          "Season": "spring",
+          "Chance": 0.15,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_hanami_koi": "11/fish/11 12 13 13 14 15 16 16 16 17 17 17 17 17 17 17 17 17 17 18 18 19 20/11/11/11/LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}

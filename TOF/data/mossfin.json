@@ -1,0 +1,163 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_mossfin": {
+          "Name": "Kree.TOF_mossfin",
+          "DisplayName": "{{i18n:mossfin.name}}",
+          "Description": "{{i18n:mossfin.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 75,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "2",
+          "Edibility": 15,
+          "ContextTags": [
+            "fish_has_roe",
+            "color_green",
+            "fish_freshwater",
+            "fish_lake",
+            "fish_crab_pot",
+            "season_spring",
+            "fish_tof_mossfin"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_mossfin": "Mossfin/42/mixed/14/34/600 1400/spring/sunny/682 .2/1/0.3/0.15/0"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_mossfin": {
+          "Id": "tof_mossfin",
+          "RequiredTags": [
+            "fish_tof_mossfin"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "130 187 84",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 8,
+              "Chance": 0.1,
+              "ItemID": "(O)614",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 4,
+              "Chance": 0.3,
+              "ItemID": "(O)297",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 0,
+              "Chance": 0.5,
+              "ItemID": "(O)812",
+              "MinQuantity": 2,
+              "MaxQuantity": 8
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)RiverJelly 3"
+            ],
+            "8": [
+              "(O)90 3"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Mountain",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Mountain_Mossfin": {
+          "Id": "Kree.TOF_Mountain_Mossfin",
+          "ItemId": "(O)Kree.TOF_mossfin",
+          "Season": "spring",
+          "Chance": 0.11,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Forest",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Forest_Mossfin": {
+          "Id": "Kree.TOF_Forest_Mossfin",
+          "ItemId": "(O)Kree.TOF_mossfin",
+          "Season": "spring",
+          "Chance": 0.27,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Railroad",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Railroad_Mossfin": {
+          "Id": "Kree.TOF_Railroad_Mossfin",
+          "ItemId": "(O)Kree.TOF_mossfin",
+          "Season": "spring",
+          "Chance": 0.18,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_mossfin": "2/fish/2/2/2/2/LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}

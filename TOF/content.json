@@ -8,6 +8,34 @@
     "EnableReedCatfish": {
       "AllowValues": "true, false",
       "Default": "true"
+    },
+    "EnableMossfin": {
+      "AllowValues": "true, false",
+      "Default": "true"
+    },
+    "EnableLanternEel": {
+      "AllowValues": "true, false",
+      "Default": "true"
+    },
+    "EnableStormray": {
+      "AllowValues": "true, false",
+      "Default": "true"
+    },
+    "EnableSurfPerch": {
+      "AllowValues": "true, false",
+      "Default": "true"
+    },
+    "EnableHanamiKoi": {
+      "AllowValues": "true, false",
+      "Default": "true"
+    },
+    "EnableCoralphin": {
+      "AllowValues": "true, false",
+      "Default": "true"
+    },
+    "EnableOrcanini": {
+      "AllowValues": "true, false",
+      "Default": "true"
     }
   },
   "Changes": [
@@ -33,227 +61,66 @@
       }
     },
     {
-      "Action": "EditData",
-      "Target": "Data/Objects",
+      "Action": "Include",
+      "FromFile": "data/mirror_koi.json",
       "When": {
         "EnableMirrorKoi": "true"
-      },
-      "Entries": {
-        "Kree.TOF_mirror_koi": {
-          "Name": "Kree.TOF_mirror_koi",
-          "DisplayName": "{{i18n:mirror_koi.name}}",
-          "Description": "{{i18n:mirror_koi.description}}",
-          "Type": "Fish",
-          "Category": -4,
-          "Price": 250,
-          "Texture": "Mods/Kree.TOF/Objects",
-          "SpriteIndex": "0",
-          "Edibility": 15,
-          "ContextTags": [
-            "color_silver",
-            "fish_has_roe",
-            "color_purple",
-            "fish_tof_mirror_koi"
-          ]
-        }
       }
     },
     {
-      "Action": "EditData",
-      "Target": "Data/Fish",
-      "When": {
-        "EnableMirrorKoi": "true"
-      },
-      "Entries": {
-        "Kree.TOF_mirror_koi": "Mirror Koi/67/mixed/18/42/600 1300/spring winter/sunny/682 .2/1/0.15/0.1/4"
-      }
-    },
-    {
-      "Action": "EditData",
-      "Target": "Data/FishPondData",
-      "When": {
-        "EnableMirrorKoi": "true"
-      },
-      "Entries": {
-        "tof_mirror_koi": {
-          "Id": "tof_mirror_koi",
-          "RequiredTags": [
-            "fish_tof_mirror_koi"
-          ],
-          "SpawnTime": -1,
-          "WaterColor": [
-            {
-              "Id": "Default",
-              "Color": "183 122 199",
-              "MinPopulation": 2,
-              "MinUnlockedPopulationGate": 0,
-              "Condition": null
-            }
-          ],
-          "ProducedItems": [
-            {
-              "RequiredPopulation": 8,
-              "Chance": 0.1,
-              "ItemID": "(O)66",
-              "MinQuantity": 2,
-              "MaxQuantity": 5
-            },
-            {
-              "RequiredPopulation": 4,
-              "Chance": 0.2,
-              "ItemID": "(O)300",
-              "MinQuantity": 2,
-              "MaxQuantity": 6
-            },
-            {
-              "RequiredPopulation": 0,
-              "Chance": 0.5,
-              "ItemID": "(O)812",
-              "MinQuantity": 1,
-              "MaxQuantity": 8
-            }
-          ],
-          "PopulationGates": {
-            "4": [
-              "(O)769 5"
-            ],
-            "8": [
-              "(O)595 1"
-            ]
-          }
-        }
-      }
-    },
-    {
-      "Action": "EditData",
-      "Target": "Data/Locations",
-      "TargetField": [
-        "Forest",
-        "Fish"
-      ],
-      "When": {
-        "EnableMirrorKoi": "true"
-      },
-      "Entries": {
-        "Kree.TOF_Forest_MirrorKoi": {
-          "Id": "Kree.TOF_Forest_MirrorKoi",
-          "ItemId": "(O)Kree.TOF_mirror_koi",
-          "Condition": "SEASON spring winter",
-          "Chance": 0.18,
-          "MinDistanceFromShore": 1,
-          "MaxDistanceFromShore": -1,
-          "Precedence": 0,
-          "CatchLimit": -1,
-          "IsBossFish": false,
-          "CanUseTrainingRod": null
-        }
-      }
-    },
-    {
-      "Action": "EditData",
-      "Target": "Data/AquariumFish",
-      "When": {
-        "EnableMirrorKoi": "true"
-      },
-      "Entries": {
-        "Kree.TOF_mirror_koi": "0/fish/0/0/0/0/LooseSprites\\KreeTOFAquariumData"
-      }
-    },
-    {
-      "Action": "EditData",
-      "Target": "Data/Objects",
+      "Action": "Include",
+      "FromFile": "data/reed_catfish.json",
       "When": {
         "EnableReedCatfish": "true"
-      },
-      "Entries": {
-        "Kree.TOF_reed_catfish": {
-          "Name": "Kree.TOF_reed_catfish",
-          "DisplayName": "{{i18n:reed_catfish.name}}",
-          "Description": "{{i18n:reed_catfish.description}}",
-          "Type": "Fish",
-          "Category": -4,
-          "Price": 110,
-          "Texture": "Mods/Kree.TOF/Objects",
-          "SpriteIndex": "1",
-          "Edibility": 10,
-          "ContextTags": [
-            "fish_has_roe",
-            "fish_tof_reed_catfish"
-          ]
-        }
       }
     },
     {
-      "Action": "EditData",
-      "Target": "Data/Fish",
+      "Action": "Include",
+      "FromFile": "data/mossfin.json",
       "When": {
-        "EnableReedCatfish": "true"
-      },
-      "Entries": {
-        "Kree.TOF_reed_catfish": "Reed Catfish/55/sinker/5/20/600 2600/summer/both/682 .2/1/0.2/0.15/0"
+        "EnableMossfin": "true"
       }
     },
     {
-      "Action": "EditData",
-      "Target": "Data/FishPondData",
+      "Action": "Include",
+      "FromFile": "data/lantern_eel.json",
       "When": {
-        "EnableReedCatfish": "true"
-      },
-      "Entries": {
-        "tof_reed_catfish": {
-          "Id": "tof_reed_catfish",
-          "RequiredTags": [
-            "fish_tof_reed_catfish"
-          ],
-          "SpawnTime": -1,
-          "WaterColor": [
-            {
-              "Id": "Default",
-              "Color": "200 200 255",
-              "MinPopulation": 2,
-              "MinUnlockedPopulationGate": 0,
-              "Condition": null
-            }
-          ],
-          "ProducedItems": [
-            {
-              "RequiredPopulation": 0,
-              "Chance": 0.5,
-              "ItemID": "(O)812",
-              "MinQuantity": 1,
-              "MaxQuantity": 1
-            }
-          ],
-          "PopulationGates": {
-            "4": [],
-            "8": []
-          }
-        }
+        "EnableLanternEel": "true"
       }
     },
     {
-      "Action": "EditData",
-      "Target": "Data/Locations",
-      "TargetField": [
-        "Mountain",
-        "Fish"
-      ],
+      "Action": "Include",
+      "FromFile": "data/stormray.json",
       "When": {
-        "EnableReedCatfish": "true"
-      },
-      "Entries": {
-        "Kree.TOF_Mountain_ReedCatfish": {
-          "Id": "Kree.TOF_Mountain_ReedCatfish",
-          "ItemId": "(O)Kree.TOF_reed_catfish",
-          "Season": "summer",
-          "Chance": 0.15,
-          "MinDistanceFromShore": 1,
-          "MaxDistanceFromShore": -1,
-          "Precedence": 0,
-          "CatchLimit": -1,
-          "IsBossFish": false,
-          "CanUseTrainingRod": null
-        }
+        "EnableStormray": "true"
+      }
+    },
+    {
+      "Action": "Include",
+      "FromFile": "data/surf_perch.json",
+      "When": {
+        "EnableSurfPerch": "true"
+      }
+    },
+    {
+      "Action": "Include",
+      "FromFile": "data/hanami_koi.json",
+      "When": {
+        "EnableHanamiKoi": "true"
+      }
+    },
+    {
+      "Action": "Include",
+      "FromFile": "data/coralphin.json",
+      "When": {
+        "EnableCoralphin": "true"
+      }
+    },
+    {
+      "Action": "Include",
+      "FromFile": "data/orcanini.json",
+      "When": {
+        "EnableOrcanini": "true"
       }
     },
     {
@@ -267,6 +134,34 @@
         {
           "ID": "tof_reed_catfish",
           "AfterID": "tof_mirror_koi"
+        },
+        {
+          "ID": "tof_mossfin",
+          "AfterID": "tof_reed_catfish"
+        },
+        {
+          "ID": "tof_lantern_eel",
+          "AfterID": "tof_mossfin"
+        },
+        {
+          "ID": "tof_stormray",
+          "AfterID": "tof_lantern_eel"
+        },
+        {
+          "ID": "tof_surf_perch",
+          "AfterID": "tof_stormray"
+        },
+        {
+          "ID": "tof_hanami_koi",
+          "AfterID": "tof_surf_perch"
+        },
+        {
+          "ID": "tof_coralphin",
+          "AfterID": "tof_hanami_koi"
+        },
+        {
+          "ID": "tof_orcanini",
+          "AfterID": "tof_coralphin"
         }
       ]
     }

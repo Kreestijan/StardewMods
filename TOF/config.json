@@ -1,4 +1,11 @@
 {
   "EnableMirrorKoi": true,
-  "EnableReedCatfish": true
+  "EnableReedCatfish": true,
+  "EnableMossfin": true,
+  "EnableLanternEel": true,
+  "EnableStormray": true,
+  "EnableSurfPerch": true,
+  "EnableHanamiKoi": true,
+  "EnableCoralphin": true,
+  "EnableOrcanini": true
 }

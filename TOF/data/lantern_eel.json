@@ -1,0 +1,113 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_lantern_eel": {
+          "Name": "Kree.TOF_lantern_eel",
+          "DisplayName": "{{i18n:lantern_eel.name}}",
+          "Description": "{{i18n:lantern_eel.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 360,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "3",
+          "Edibility": 24,
+          "ContextTags": [
+            "fish_has_roe",
+            "color_dark_gray",
+            "color_blue",
+            "fish_ocean",
+            "fish_crab_pot",
+            "season_summer",
+            "season_fall",
+            "fish_tof_lantern_eel"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_lantern_eel": "Lantern Eel/75/dart/20/58/1800 2600/summer fall/both/682 .2/1/0.1/0.15/6"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_lantern_eel": {
+          "Id": "tof_lantern_eel",
+          "RequiredTags": [
+            "fish_tof_lantern_eel"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "22 22 116",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 10,
+              "Chance": 0.15,
+              "ItemID": "(O)553",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 0,
+              "Chance": 0.4,
+              "ItemID": "(O)812",
+              "MinQuantity": 2,
+              "MaxQuantity": 6
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)68 3"
+            ],
+            "8": [
+              "(O)430 3"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Beach",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Beach_LanternEel": {
+          "Id": "Kree.TOF_Beach_LanternEel",
+          "ItemId": "(O)Kree.TOF_lantern_eel",
+          "Condition": "SEASON summer fall",
+          "Chance": 0.07,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_lantern_eel": "3/eel/3/3/3/3/LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}

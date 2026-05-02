@@ -1,0 +1,113 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_coralphin": {
+          "Name": "Kree.TOF_coralphin",
+          "DisplayName": "{{i18n:coralphin.name}}",
+          "Description": "{{i18n:coralphin.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 376,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "7",
+          "Edibility": 16,
+          "ContextTags": [
+            "fish_has_roe",
+            "color_orange",
+            "color_blue",
+            "fish_ocean",
+            "season_spring",
+            "season_summer",
+            "season_fall",
+            "fish_tof_coralphin"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_coralphin": "Coralphin/80/smooth/18/79/1000 1900/spring summer fall/both/682 .2/1/0.1/0.15/0"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_coralphin": {
+          "Id": "tof_coralphin",
+          "RequiredTags": [
+            "fish_tof_coralphin"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "79 79 243",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 10,
+              "Chance": 0.05,
+              "ItemID": "(O)797",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 2,
+              "Chance": 0.2,
+              "ItemID": "(O)812",
+              "MinQuantity": 1,
+              "MaxQuantity": 3
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)774 5"
+            ],
+            "8": [
+              "(O)797 1"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Beach",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Beach_Coralphin": {
+          "Id": "Kree.TOF_Beach_Coralphin",
+          "ItemId": "(O)Kree.TOF_coralphin",
+          "Condition": "SEASON spring summer fall",
+          "Chance": 0.12,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_coralphin": "22/fish/////LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}

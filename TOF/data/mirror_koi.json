@@ -1,0 +1,121 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_mirror_koi": {
+          "Name": "Kree.TOF_mirror_koi",
+          "DisplayName": "{{i18n:mirror_koi.name}}",
+          "Description": "{{i18n:mirror_koi.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 250,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "0",
+          "Edibility": 15,
+          "ContextTags": [
+            "color_silver",
+            "fish_has_roe",
+            "color_purple",
+            "fish_lake",
+            "fish_freshwater",
+            "season_spring",
+            "season_winter",
+            "fish_crab_pot",
+            "fish_tof_mirror_koi"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_mirror_koi": "Mirror Koi/67/mixed/18/42/600 1300/spring winter/sunny/682 .2/1/0.15/0.1/4"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_mirror_koi": {
+          "Id": "tof_mirror_koi",
+          "RequiredTags": [
+            "fish_tof_mirror_koi"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "183 122 199",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 8,
+              "Chance": 0.1,
+              "ItemID": "(O)66",
+              "MinQuantity": 2,
+              "MaxQuantity": 5
+            },
+            {
+              "RequiredPopulation": 4,
+              "Chance": 0.2,
+              "ItemID": "(O)300",
+              "MinQuantity": 2,
+              "MaxQuantity": 6
+            },
+            {
+              "RequiredPopulation": 0,
+              "Chance": 0.5,
+              "ItemID": "(O)812",
+              "MinQuantity": 1,
+              "MaxQuantity": 4
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)769 5"
+            ],
+            "8": [
+              "(O)595 1"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Forest",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Forest_MirrorKoi": {
+          "Id": "Kree.TOF_Forest_MirrorKoi",
+          "ItemId": "(O)Kree.TOF_mirror_koi",
+          "Condition": "SEASON spring winter",
+          "Chance": 0.18,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_mirror_koi": "0/fish/0/0/0/0/LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}

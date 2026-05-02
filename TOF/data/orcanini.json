@@ -1,0 +1,122 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_orcanini": {
+          "Name": "Kree.TOF_orcanini",
+          "DisplayName": "{{i18n:orcanini.name}}",
+          "Description": "{{i18n:orcanini.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 666,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "8",
+          "Edibility": 22,
+          "ContextTags": [
+            "fish_has_roe",
+            "color_pink",
+            "fish_ocean",
+            "fish_semi_rare",
+            "season_all",
+            "season_fall",
+            "season_spring",
+            "season_summer",
+            "season_winter",
+            "fish_tof_orcanini"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_orcanini": "Orcanini/79/sinker/30/88/800 2100/spring summer fall winter/both/682 .2/1/0.2/0.15/6"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_orcanini": {
+          "Id": "tof_orcanini",
+          "RequiredTags": [
+            "fish_tof_orcanini"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "228 78 150",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 10,
+              "Chance": 0.1,
+              "ItemID": "(O)562",
+              "MinQuantity": 1,
+              "MaxQuantity": 3
+            },
+            {
+              "RequiredPopulation": 8,
+              "Chance": 0.3,
+              "ItemID": "(O)858",
+              "MinQuantity": 2,
+              "MaxQuantity": 5
+            },
+            {
+              "RequiredPopulation": 2,
+              "Chance": 0.6,
+              "ItemID": "(O)812",
+              "MinQuantity": 1,
+              "MaxQuantity": 3
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)406 6"
+            ],
+            "8": [
+              "(O)690 5",
+              "(O)155 3"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Beach",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Beach_Orcanini": {
+          "Id": "Kree.TOF_Beach_Orcanini",
+          "ItemId": "(O)Kree.TOF_orcanini",
+          "Chance": 0.15,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_orcanini": "23/fish/23 23 23 23 23 23 23 23 23 23 23 23 24 24 25 26 27 27 27 27 27 27 27 27 27 28 29 30 31 31 30 29 28 27 27 27 26 25 25 24////LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_surf_perch": {
+          "Name": "Kree.TOF_surf_perch",
+          "DisplayName": "{{i18n:surf_perch.name}}",
+          "Description": "{{i18n:surf_perch.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 122,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "5",
+          "Edibility": 7,
+          "ContextTags": [
+            "fish_has_roe",
+            "season_summer",
+            "season_fall",
+            "fish_ocean",
+            "color_red",
+            "color_blue",
+            "fish_tof_surf_perch"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_surf_perch": "Surf Perch/49/mixed/3/26/1000 1800/summer fall/sunny/682 .2/1/0.2/0.15/2"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_surf_perch": {
+          "Id": "tof_surf_perch",
+          "RequiredTags": [
+            "fish_tof_surf_perch"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "127 205 225",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 10,
+              "Chance": 0.05,
+              "ItemID": "(O)222",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 6,
+              "Chance": 0.1,
+              "ItemID": "(O)372",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 0,
+              "Chance": 0.6,
+              "ItemID": "(O)812",
+              "MinQuantity": 1,
+              "MaxQuantity": 4
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)16 3"
+            ],
+            "8": [
+              "(O)229 3"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Beach",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Beach_SurfPerch": {
+          "Id": "Kree.TOF_Beach_SurfPerch",
+          "ItemId": "(O)Kree.TOF_surf_perch",
+          "Condition": "SEASON summer fall",
+          "Chance": 0.25,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_surf_perch": "10/fish/////LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}

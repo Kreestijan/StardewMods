@@ -1,0 +1,114 @@
+{
+  "Changes": [
+    {
+      "Action": "EditData",
+      "Target": "Data/Objects",
+      "Entries": {
+        "Kree.TOF_stormray": {
+          "Name": "Kree.TOF_stormray",
+          "DisplayName": "{{i18n:stormray.name}}",
+          "Description": "{{i18n:stormray.description}}",
+          "Type": "Fish",
+          "Category": -4,
+          "Price": 375,
+          "Texture": "Mods/Kree.TOF/Objects",
+          "SpriteIndex": "4",
+          "Edibility": 12,
+          "ContextTags": [
+            "fish_has_roe",
+            "color_blue",
+            "color_dark_gray",
+            "fish_ocean",
+            "fish_crab_pot",
+            "season_summer",
+            "season_spring",
+            "season_fall",
+            "fish_tof_stormray"
+          ]
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Fish",
+      "Entries": {
+        "Kree.TOF_stormray": "Stormray/75/smooth/15/67/600 2600/spring summer fall/rainy/682 .2/1/0.2/0.15/4"
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/FishPondData",
+      "Entries": {
+        "tof_stormray": {
+          "Id": "tof_stormray",
+          "RequiredTags": [
+            "fish_tof_stormray"
+          ],
+          "SpawnTime": -1,
+          "WaterColor": [
+            {
+              "Id": "Default",
+              "Color": "57 57 177",
+              "MinPopulation": 2,
+              "MinUnlockedPopulationGate": 0,
+              "Condition": null
+            }
+          ],
+          "ProducedItems": [
+            {
+              "RequiredPopulation": 8,
+              "Chance": 0.1,
+              "ItemID": "(O)787",
+              "MinQuantity": 1,
+              "MaxQuantity": 2
+            },
+            {
+              "RequiredPopulation": 0,
+              "Chance": 0.2,
+              "ItemID": "(O)812",
+              "MinQuantity": 1,
+              "MaxQuantity": 4
+            }
+          ],
+          "PopulationGates": {
+            "4": [
+              "(O)258 3"
+            ],
+            "8": [
+              "(O)348 5"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/Locations",
+      "TargetField": [
+        "Beach",
+        "Fish"
+      ],
+      "Entries": {
+        "Kree.TOF_Beach_Stormray": {
+          "Id": "Kree.TOF_Beach_Stormray",
+          "ItemId": "(O)Kree.TOF_stormray",
+          "Condition": "SEASON spring summer fall",
+          "Chance": 0.15,
+          "MinDistanceFromShore": 1,
+          "MaxDistanceFromShore": -1,
+          "Precedence": 0,
+          "CatchLimit": -1,
+          "IsBossFish": false,
+          "CanUseTrainingRod": null
+        }
+      }
+    },
+    {
+      "Action": "EditData",
+      "Target": "Data/AquariumFish",
+      "Entries": {
+        "Kree.TOF_stormray": "4/fish/4 5 5 6 6 6 7 7 8 8 9 9/6/7 8 8/6/LooseSprites\\KreeTOFAquariumData"
+      }
+    }
+  ]
+}
