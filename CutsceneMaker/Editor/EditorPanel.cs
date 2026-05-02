@@ -46,6 +46,14 @@ public abstract class EditorPanel
     {
     }
 
+    public virtual void LeftClickHeld(int x, int y)
+    {
+    }
+
+    public virtual void ReleaseLeftClick(int x, int y)
+    {
+    }
+
     public virtual void ReceiveRightClick(int x, int y)
     {
     }

@@ -33,12 +33,19 @@ public sealed class TimelinePanel : EditorPanel
     private Rectangle addButtonBounds;
     private bool addMenuOpen;
     private int? contextCommandIndex;
+    private int? draggedCommandIndex;
+    private object? draggedCommand;
+    private Point dragOffset;
+    private Point dragPosition;
+    private bool hasDragged;
 
     public TimelinePanel(EditorState state)
         : base("Timeline")
     {
         this.state = state;
     }
+
+    public bool IsDragging => this.draggedCommand is not null;
 
     public override void Draw(SpriteBatch spriteBatch)
     {
@@ -49,6 +56,11 @@ public sealed class TimelinePanel : EditorPanel
         foreach ((Rectangle bounds, int commandIndex) in this.commandBlocks)
         {
             object command = this.state.Cutscene.Commands[commandIndex];
+            if (ReferenceEquals(this.draggedCommand, command))
+            {
+                continue;
+            }
+
             string label = command switch
             {
                 TimelineCommand timelineCommand => timelineCommand.Type.ToString(),
@@ -84,6 +96,12 @@ public sealed class TimelinePanel : EditorPanel
         {
             this.DrawContextMenu(spriteBatch);
         }
+
+        if (this.draggedCommand is not null)
+        {
+            this.DrawDropMarker(spriteBatch);
+            this.DrawDraggedBlock(spriteBatch);
+        }
     }
 
     public override void ReceiveLeftClick(int x, int y)
@@ -107,6 +125,11 @@ public sealed class TimelinePanel : EditorPanel
             {
                 this.state.SelectedCommandIndex = commandIndex;
                 this.CloseTransientMenus();
+                if (this.CanEditCommand(commandIndex))
+                {
+                    this.StartDrag(commandIndex, bounds, x, y);
+                }
+
                 return;
             }
         }
@@ -119,6 +142,42 @@ public sealed class TimelinePanel : EditorPanel
         }
 
         this.CloseTransientMenus();
+    }
+
+    public override void LeftClickHeld(int x, int y)
+    {
+        if (this.draggedCommand is null || !this.draggedCommandIndex.HasValue)
+        {
+            return;
+        }
+
+        this.dragPosition = new Point(x, y);
+        Rectangle draggedBounds = this.GetDraggedBounds();
+        if (Math.Abs(draggedBounds.X - this.GetCommandBounds(this.draggedCommandIndex.Value).X) > 4
+            || Math.Abs(draggedBounds.Y - this.GetCommandBounds(this.draggedCommandIndex.Value).Y) > 4)
+        {
+            this.hasDragged = true;
+        }
+    }
+
+    public override void ReleaseLeftClick(int x, int y)
+    {
+        if (this.draggedCommand is null || !this.draggedCommandIndex.HasValue)
+        {
+            return;
+        }
+
+        object command = this.draggedCommand;
+        this.dragPosition = new Point(x, y);
+
+        if (this.hasDragged)
+        {
+            this.DropCommand(command, x);
+        }
+
+        this.draggedCommandIndex = null;
+        this.draggedCommand = null;
+        this.hasDragged = false;
     }
 
     public override void ReceiveRightClick(int x, int y)
@@ -273,6 +332,30 @@ public sealed class TimelinePanel : EditorPanel
         this.DrawMenuButton(spriteBatch, this.duplicateButtonBounds.Value, "Duplicate");
     }
 
+    private void DrawDraggedBlock(SpriteBatch spriteBatch)
+    {
+        if (this.draggedCommand is null)
+        {
+            return;
+        }
+
+        string label = this.GetCommandLabel(this.draggedCommand);
+        this.DrawBlock(spriteBatch, this.GetDraggedBounds(), label, selected: true);
+    }
+
+    private void DrawDropMarker(SpriteBatch spriteBatch)
+    {
+        if (this.draggedCommand is null || !this.hasDragged)
+        {
+            return;
+        }
+
+        int targetIndex = this.GetDropTargetIndex(this.GetDraggedBounds().Center.X);
+        int markerX = this.GetDropMarkerX(targetIndex);
+        Rectangle marker = new(markerX - 3, this.Bounds.Y + 52, 6, BlockHeight + 12);
+        spriteBatch.Draw(Game1.staminaRect, marker, Color.DarkOrange * 0.9f);
+    }
+
     private void DrawMenuButton(SpriteBatch spriteBatch, Rectangle bounds, string label)
     {
         IClickableMenu.drawTextureBox(spriteBatch, bounds.X, bounds.Y, bounds.Width, bounds.Height, Color.White);
@@ -364,6 +447,152 @@ public sealed class TimelinePanel : EditorPanel
         this.state.SelectedCommandIndex = commandIndex + 1;
         this.state.IsDirty = true;
         this.CloseTransientMenus();
+    }
+
+    private void StartDrag(int commandIndex, Rectangle bounds, int x, int y)
+    {
+        this.draggedCommandIndex = commandIndex;
+        this.draggedCommand = this.state.Cutscene.Commands[commandIndex];
+        this.dragOffset = new Point(x - bounds.X, y - bounds.Y);
+        this.dragPosition = new Point(x, y);
+        this.hasDragged = false;
+    }
+
+    private void DropCommand(object command, int mouseX)
+    {
+        int commandIndex = this.IndexOfCommand(command);
+        if (!this.CanEditCommand(commandIndex))
+        {
+            return;
+        }
+
+        int targetIndex = this.GetDropTargetIndex(mouseX);
+        if (targetIndex > commandIndex)
+        {
+            targetIndex--;
+        }
+
+        int endIndex = Math.Max(0, this.state.Cutscene.Commands.Count - 1);
+        targetIndex = Math.Clamp(targetIndex, 0, endIndex - 1);
+        if (targetIndex == commandIndex)
+        {
+            return;
+        }
+
+        this.state.Cutscene.Commands.RemoveAt(commandIndex);
+        this.state.Cutscene.Commands.Insert(targetIndex, command);
+        this.state.SelectedCommandIndex = targetIndex;
+        this.state.IsDirty = true;
+        this.RebuildBlockBounds();
+    }
+
+    private int GetDropTargetIndex(int mouseX)
+    {
+        int endIndex = Math.Max(0, this.state.Cutscene.Commands.Count - 1);
+        int targetIndex = endIndex;
+
+        foreach ((Rectangle bounds, int commandIndex) in this.commandBlocks)
+        {
+            object command = this.state.Cutscene.Commands[commandIndex];
+            if (ReferenceEquals(command, this.draggedCommand))
+            {
+                continue;
+            }
+
+            if (commandIndex >= endIndex)
+            {
+                if (mouseX < bounds.Center.X)
+                {
+                    targetIndex = endIndex;
+                }
+
+                break;
+            }
+
+            if (mouseX < bounds.Center.X)
+            {
+                targetIndex = commandIndex;
+                break;
+            }
+        }
+
+        return targetIndex;
+    }
+
+    private int GetDropMarkerX(int targetIndex)
+    {
+        foreach ((Rectangle bounds, int commandIndex) in this.commandBlocks)
+        {
+            if (commandIndex == targetIndex)
+            {
+                return bounds.X - BlockGap / 2;
+            }
+        }
+
+        int endIndex = Math.Max(0, this.state.Cutscene.Commands.Count - 1);
+        Rectangle endBounds = this.GetCommandBounds(endIndex);
+        return endBounds.X - BlockGap / 2;
+    }
+
+    private Rectangle GetDraggedBounds()
+    {
+        return new Rectangle(
+            this.dragPosition.X - this.dragOffset.X,
+            this.dragPosition.Y - this.dragOffset.Y,
+            BlockWidth,
+            BlockHeight
+        );
+    }
+
+    private Rectangle GetCommandBounds(int commandIndex)
+    {
+        foreach ((Rectangle bounds, int index) in this.commandBlocks)
+        {
+            if (index == commandIndex)
+            {
+                return bounds;
+            }
+        }
+
+        return Rectangle.Empty;
+    }
+
+    private int IndexOfCommand(object command)
+    {
+        for (int index = 0; index < this.state.Cutscene.Commands.Count; index++)
+        {
+            if (ReferenceEquals(this.state.Cutscene.Commands[index], command))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private string GetCommandLabel(object command)
+    {
+        return command switch
+        {
+            TimelineCommand timelineCommand => timelineCommand.Type.ToString(),
+            RawCommandBlock => "Raw",
+            _ => "Unknown"
+        };
+    }
+
+    private string GetCommandLabel(int commandIndex)
+    {
+        if (commandIndex < 0 || commandIndex >= this.state.Cutscene.Commands.Count)
+        {
+            return "Unknown";
+        }
+
+        return this.state.Cutscene.Commands[commandIndex] switch
+        {
+            TimelineCommand timelineCommand => timelineCommand.Type.ToString(),
+            RawCommandBlock => "Raw",
+            _ => "Unknown"
+        };
     }
 
     private bool CanEditCommand(int commandIndex)

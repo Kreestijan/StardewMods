@@ -2,6 +2,7 @@ using CutsceneMaker.Models;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using System.Runtime.CompilerServices;
 using StardewValley;
 using StardewValley.Menus;
 
@@ -96,9 +97,9 @@ public sealed class PropertiesPanel : EditorPanel
             case CommandType.Move:
                 this.DrawLine(spriteBatch, $"Actor: {command.ActorName ?? "farmer"}", x, y + RowHeight);
                 this.DrawLine(spriteBatch, "Tile X", x, y + RowHeight * 2);
-                this.DrawIntegerField(spriteBatch, $"{this.state.SelectedCommandIndex}.move.tileX", new Rectangle(x + 90, y + RowHeight * 2 - 8, 78, 40), () => command.TileX ?? 0, value => command.TileX = value);
+                this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "move.tileX"), new Rectangle(x + 90, y + RowHeight * 2 - 8, 78, 40), () => command.TileX ?? 0, value => command.TileX = value);
                 this.DrawLine(spriteBatch, "Y", x + 180, y + RowHeight * 2);
-                this.DrawIntegerField(spriteBatch, $"{this.state.SelectedCommandIndex}.move.tileY", new Rectangle(x + 210, y + RowHeight * 2 - 8, 78, 40), () => command.TileY ?? 0, value => command.TileY = value);
+                this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "move.tileY"), new Rectangle(x + 210, y + RowHeight * 2 - 8, 78, 40), () => command.TileY ?? 0, value => command.TileY = value);
                 this.DrawLine(spriteBatch, $"Facing: {FacingName(command.Facing ?? 2)}", x, y + RowHeight * 3);
                 this.DrawButton(spriteBatch, new Rectangle(x, y + RowHeight * 4, 120, ButtonHeight), "Actor", () => this.CycleActor(command, 1), () => this.CycleActor(command, -1));
                 this.DrawButton(spriteBatch, new Rectangle(x + 128, y + RowHeight * 4, 136, ButtonHeight), "Facing", () => this.CycleFacing(command, 1), () => this.CycleFacing(command, -1));
@@ -107,13 +108,13 @@ public sealed class PropertiesPanel : EditorPanel
             case CommandType.Speak:
                 this.DrawLine(spriteBatch, $"Actor: {command.ActorName ?? "farmer"}", x, y + RowHeight);
                 this.DrawLine(spriteBatch, "Dialogue", x, y + RowHeight * 2);
-                this.DrawStringField(spriteBatch, $"{this.state.SelectedCommandIndex}.speak.dialogue", new Rectangle(x, y + RowHeight * 3, Math.Max(160, this.Bounds.Width - 48), 44), () => command.DialogueText ?? string.Empty, value => command.DialogueText = value, textLimit: 220);
+                this.DrawStringField(spriteBatch, CommandFieldKey(command, "speak.dialogue"), new Rectangle(x, y + RowHeight * 3, Math.Max(160, this.Bounds.Width - 48), 44), () => command.DialogueText ?? string.Empty, value => command.DialogueText = value, textLimit: 220);
                 this.DrawButton(spriteBatch, new Rectangle(x, y + RowHeight * 5, 120, ButtonHeight), "Actor", () => this.CycleActor(command, 1), () => this.CycleActor(command, -1));
                 break;
 
             case CommandType.Pause:
                 this.DrawLine(spriteBatch, "Duration", x, y + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.state.SelectedCommandIndex}.pause.duration", new Rectangle(x + 120, y + RowHeight - 8, 120, 40), () => command.DurationMs ?? 0, value => command.DurationMs = Math.Max(0, value));
+                this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "pause.duration"), new Rectangle(x + 120, y + RowHeight - 8, 120, 40), () => command.DurationMs ?? 0, value => command.DurationMs = Math.Max(0, value));
                 this.DrawButton(spriteBatch, new Rectangle(x, y + RowHeight * 2, 72, ButtonHeight), "-100", () => this.ChangePause(command, -100));
                 this.DrawButton(spriteBatch, new Rectangle(x + 80, y + RowHeight * 2, 72, ButtonHeight), "+100", () => this.ChangePause(command, 100));
                 break;
@@ -131,7 +132,7 @@ public sealed class PropertiesPanel : EditorPanel
                 this.DrawLine(spriteBatch, $"Actor: {command.ActorName ?? "farmer"}", x, y + RowHeight);
                 this.DrawLine(spriteBatch, $"Emote: {GetEmoteName(command.EmoteId ?? 8)}", x, y + RowHeight * 2);
                 this.DrawLine(spriteBatch, "ID", x, y + RowHeight * 3);
-                this.DrawIntegerField(spriteBatch, $"{this.state.SelectedCommandIndex}.emote.id", new Rectangle(x + 48, y + RowHeight * 3 - 8, 88, 40), () => command.EmoteId ?? 8, value => command.EmoteId = Math.Max(0, value));
+                this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "emote.id"), new Rectangle(x + 48, y + RowHeight * 3 - 8, 88, 40), () => command.EmoteId ?? 8, value => command.EmoteId = Math.Max(0, value));
                 this.DrawButton(spriteBatch, new Rectangle(x, y + RowHeight * 4, 120, ButtonHeight), "Actor", () => this.CycleActor(command, 1), () => this.CycleActor(command, -1));
                 this.DrawButton(spriteBatch, new Rectangle(x + 128, y + RowHeight * 4, 72, ButtonHeight), "-1", () => this.ChangeEmote(command, -1));
                 this.DrawButton(spriteBatch, new Rectangle(x + 208, y + RowHeight * 4, 72, ButtonHeight), "+1", () => this.ChangeEmote(command, 1));
@@ -281,28 +282,33 @@ public sealed class PropertiesPanel : EditorPanel
         {
             case RewardType.Item:
                 this.DrawLine(spriteBatch, "Item ID", x, y);
-                this.DrawStringField(spriteBatch, $"{this.state.SelectedCommandIndex}.reward.itemId", new Rectangle(x + 90, y - 8, 160, 40), () => command.ItemId ?? string.Empty, value => command.ItemId = value, textLimit: 80);
+                this.DrawStringField(spriteBatch, CommandFieldKey(command, "reward.itemId"), new Rectangle(x + 90, y - 8, 160, 40), () => command.ItemId ?? string.Empty, value => command.ItemId = value, textLimit: 80);
                 this.DrawLine(spriteBatch, "Qty", x, y + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.state.SelectedCommandIndex}.reward.qty", new Rectangle(x + 90, y + RowHeight - 8, 80, 40), () => command.Quantity ?? 1, value => command.Quantity = Math.Max(1, value));
+                this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "reward.qty"), new Rectangle(x + 90, y + RowHeight - 8, 80, 40), () => command.Quantity ?? 1, value => command.Quantity = Math.Max(1, value));
                 break;
 
             case RewardType.Gold:
                 this.DrawLine(spriteBatch, "Gold", x, y);
-                this.DrawIntegerField(spriteBatch, $"{this.state.SelectedCommandIndex}.reward.gold", new Rectangle(x + 90, y - 8, 120, 40), () => command.GoldAmount ?? 0, value => command.GoldAmount = Math.Max(0, value));
+                this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "reward.gold"), new Rectangle(x + 90, y - 8, 120, 40), () => command.GoldAmount ?? 0, value => command.GoldAmount = Math.Max(0, value));
                 break;
 
             case RewardType.Friendship:
                 this.DrawLine(spriteBatch, "NPC", x, y);
-                this.DrawStringField(spriteBatch, $"{this.state.SelectedCommandIndex}.reward.npc", new Rectangle(x + 90, y - 8, 160, 40), () => command.RewardNpcName ?? string.Empty, value => command.RewardNpcName = value, textLimit: 80);
+                this.DrawStringField(spriteBatch, CommandFieldKey(command, "reward.npc"), new Rectangle(x + 90, y - 8, 160, 40), () => command.RewardNpcName ?? string.Empty, value => command.RewardNpcName = value, textLimit: 80);
                 this.DrawLine(spriteBatch, "Points", x, y + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.state.SelectedCommandIndex}.reward.friendship", new Rectangle(x + 90, y + RowHeight - 8, 120, 40), () => command.FriendshipAmount ?? 0, value => command.FriendshipAmount = Math.Max(0, value));
+                this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "reward.friendship"), new Rectangle(x + 90, y + RowHeight - 8, 120, 40), () => command.FriendshipAmount ?? 0, value => command.FriendshipAmount = Math.Max(0, value));
                 break;
 
             default:
                 this.DrawLine(spriteBatch, "ID", x, y);
-                this.DrawStringField(spriteBatch, $"{this.state.SelectedCommandIndex}.reward.id", new Rectangle(x + 90, y - 8, 180, 40), () => command.ItemId ?? string.Empty, value => command.ItemId = value, textLimit: 100);
+                this.DrawStringField(spriteBatch, CommandFieldKey(command, "reward.id"), new Rectangle(x + 90, y - 8, 180, 40), () => command.ItemId ?? string.Empty, value => command.ItemId = value, textLimit: 100);
                 break;
         }
+    }
+
+    private static string CommandFieldKey(TimelineCommand command, string fieldName)
+    {
+        return $"{RuntimeHelpers.GetHashCode(command)}.{fieldName}";
     }
 
     private BoundTextField GetTextField(string key, Func<string> getValue, Action<string> setValue, bool numbersOnly, int textLimit)

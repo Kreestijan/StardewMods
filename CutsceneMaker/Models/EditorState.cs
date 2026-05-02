@@ -18,6 +18,9 @@ public sealed class EditorState
     [JsonIgnore]
     public GameLocation? BootstrappedMap { get; set; }
 
+    [JsonIgnore]
+    public string MapLoadFailureMessage { get; set; } = string.Empty;
+
     public EditorMode Mode { get; set; } = EditorMode.Edit;
 
     public int SelectedCommandIndex { get; set; } = -1;

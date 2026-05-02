@@ -34,18 +34,29 @@ public sealed class ModEntry : Mod
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
     {
-        Dictionary<string, LocationData> locationData = this.Helper.GameContent.Load<Dictionary<string, LocationData>>("Data/Locations");
-        LocationBootstrapper.SetSupportedLocations(LocationBootstrapper.GetLocationNamesFromData(locationData));
-
+        this.RefreshKnownLocations();
         this.RefreshKnownNpcs();
 
-        GameLocation? town = LocationBootstrapper.Load("Town");
+        LocationLoadResult town = LocationBootstrapper.LoadDetailed("Town");
         this.Monitor.Log(
-            town is null
-                ? "Cutscene Maker bootstrap check could not load Town."
+            !town.Loaded
+                ? $"Cutscene Maker bootstrap check could not load Town: {town.FailureReason}"
                 : "Cutscene Maker bootstrap check loaded Town.",
-            town is null ? LogLevel.Warn : LogLevel.Trace
+            !town.Loaded ? LogLevel.Warn : LogLevel.Trace
         );
+    }
+
+    public void RefreshKnownLocations()
+    {
+        try
+        {
+            Dictionary<string, LocationData> locationData = this.Helper.GameContent.Load<Dictionary<string, LocationData>>("Data/Locations");
+            LocationBootstrapper.SetSupportedLocations(locationData);
+        }
+        catch (Exception ex)
+        {
+            this.Monitor.Log($"Cutscene Maker could not read Data/Locations: {ex.Message}", LogLevel.Warn);
+        }
     }
 
     public void RefreshKnownNpcs()

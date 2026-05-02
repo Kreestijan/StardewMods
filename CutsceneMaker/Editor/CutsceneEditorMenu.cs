@@ -18,6 +18,9 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private const int PanelGap = 12;
     private const int MinimumWidth = 960;
     private const int MinimumHeight = 640;
+    private const int LocationDropdownRowHeight = 34;
+    private const int LocationDropdownMaxRows = 10;
+    private const int LocationSearchHeight = 42;
     // Public SMAPI/game APIs don't expose a writable Game1.player at the title screen.
     // Play preview needs a temporary farmer because Event initialization reads Game1.player.
     private static readonly PropertyInfo? GamePlayerProperty = typeof(Game1).GetProperty("player", BindingFlags.Public | BindingFlags.Static);
@@ -27,6 +30,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private readonly TimelinePanel timelinePanel;
     private readonly PropertiesPanel propertiesPanel;
     private readonly List<(Rectangle Bounds, Action LeftClick, Action? RightClick)> toolbarButtons = new();
+    private readonly List<(Rectangle Bounds, string LocationName)> locationDropdownRows = new();
     private readonly HashSet<int> registeredPreviewEmoteCommands = new();
     private PreconditionEditorPanel? preconditionEditorPanel;
     private SaveDialogPanel? saveDialogPanel;
@@ -39,6 +43,12 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private GameLocation? previousLocation;
     private IClickableMenu? playbackDialogueBox;
     private bool previousEventUp;
+    private bool previousGlobalFade;
+    private bool previousFadeIn;
+    private bool previousFadeToBlack;
+    private bool previousNonWarpFade;
+    private float previousFadeToBlackAlpha;
+    private float previousGlobalFadeSpeed;
     private bool yieldPlaybackFrame;
     private bool closeConfirmationOpen;
     private Rectangle closeConfirmYesBounds;
@@ -47,6 +57,10 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private string closeConfirmMessage = "Unsaved changes will be lost.";
     private string closeConfirmYesLabel = "Exit";
     private Action? closeConfirmAction;
+    private bool locationDropdownOpen;
+    private int locationDropdownScrollIndex;
+    private string locationSearchText = string.Empty;
+    private Rectangle locationButtonBounds;
     private bool previewPlayerCreated;
     private bool playbackBootstrapActive;
     private bool playWarningShown;
@@ -60,8 +74,9 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             showUpperRightCloseButton: true
         )
     {
+        ModEntry.Instance.RefreshKnownLocations();
         ModEntry.Instance.RefreshKnownNpcs();
-        this.state.BootstrappedMap = LocationBootstrapper.Load(this.state.Cutscene.LocationName);
+        this.LoadPreviewLocation(this.state.Cutscene.LocationName);
         this.mapViewPanel = new MapViewPanel(this.state);
         this.timelinePanel = new TimelinePanel(this.state);
         this.propertiesPanel = new PropertiesPanel(this.state, this.OpenPreconditionEditor);
@@ -90,6 +105,11 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.mapViewPanel.Draw(b);
         this.propertiesPanel.Draw(b);
         this.timelinePanel.Draw(b);
+        if (this.locationDropdownOpen)
+        {
+            this.DrawLocationDropdown(b);
+        }
+
         this.playbackDialogueBox?.draw(b);
         this.preconditionEditorPanel?.Draw(b);
         this.saveDialogPanel?.Draw(b);
@@ -152,6 +172,11 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             return;
         }
 
+        if (this.TryHandleLocationDropdownClick(x, y))
+        {
+            return;
+        }
+
         foreach ((Rectangle bounds, Action click, _) in this.toolbarButtons)
         {
             if (bounds.Contains(x, y))
@@ -160,6 +185,8 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 return;
             }
         }
+
+        this.CloseLocationDropdown();
 
         if (this.state.Mode == EditorMode.Play)
         {
@@ -198,12 +225,31 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         base.receiveLeftClick(x, y, playSound);
     }
 
+    public override void leftClickHeld(int x, int y)
+    {
+        if (this.state.Mode != EditorMode.Play && (this.timelinePanel.Bounds.Contains(x, y) || this.timelinePanel.IsDragging))
+        {
+            this.timelinePanel.LeftClickHeld(x, y);
+            return;
+        }
+
+        base.leftClickHeld(x, y);
+    }
+
+    public override void releaseLeftClick(int x, int y)
+    {
+        this.timelinePanel.ReleaseLeftClick(x, y);
+        base.releaseLeftClick(x, y);
+    }
+
     public override void receiveRightClick(int x, int y, bool playSound = true)
     {
         if (this.closeConfirmationOpen)
         {
             return;
         }
+
+        this.CloseLocationDropdown();
 
         if (this.saveDialogPanel is not null || this.eventPickerPanel is not null || this.state.Mode == EditorMode.Play)
         {
@@ -261,6 +307,12 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         int mouseX = Game1.getMouseX(ui_scale: true);
         int mouseY = Game1.getMouseY(ui_scale: true);
 
+        if (this.locationDropdownOpen && this.GetLocationDropdownBounds().Contains(mouseX, mouseY))
+        {
+            this.ScrollLocationDropdown(direction);
+            return;
+        }
+
         if (this.mapViewPanel.Bounds.Contains(mouseX, mouseY))
         {
             this.mapViewPanel.ReceiveScrollWheelAction(direction);
@@ -279,6 +331,11 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 this.closeConfirmationOpen = false;
             }
 
+            return;
+        }
+
+        if (this.locationDropdownOpen && this.HandleLocationDropdownKey(key))
+        {
             return;
         }
 
@@ -380,35 +437,231 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.state.UndoStack.Clear();
         this.state.RedoStack.Clear();
         this.state.PreviewEmotes.Clear();
-        this.state.BootstrappedMap = LocationBootstrapper.Load(this.state.Cutscene.LocationName);
+        this.LoadPreviewLocation(this.state.Cutscene.LocationName);
         this.state.IsDirty = false;
         this.toolbarStatusMessage = "Started a new cutscene.";
     }
 
-    private void CycleLocation(int direction)
+    private void ToggleLocationDropdown()
     {
-        IReadOnlyList<string> locations = LocationBootstrapper.SupportedLocations;
-        if (locations.Count == 0)
+        ModEntry.Instance.RefreshKnownLocations();
+        if (LocationBootstrapper.SupportedLocations.Count == 0)
         {
             this.toolbarStatusMessage = "No locations found.";
             return;
         }
 
-        int currentIndex = Math.Max(0, locations.ToList().FindIndex(name => name.Equals(this.state.Cutscene.LocationName, StringComparison.OrdinalIgnoreCase)));
-        string nextLocation = locations[WrapIndex(currentIndex + Math.Sign(direction), locations.Count)];
-        if (nextLocation.Equals(this.state.Cutscene.LocationName, StringComparison.OrdinalIgnoreCase))
+        this.locationDropdownOpen = !this.locationDropdownOpen;
+        if (this.locationDropdownOpen)
         {
+            this.locationSearchText = string.Empty;
+            IReadOnlyList<string> filteredLocations = this.GetFilteredLocations();
+            int selectedIndex = FindLocationIndex(filteredLocations, this.state.Cutscene.LocationName);
+            this.locationDropdownScrollIndex = Math.Clamp(
+                selectedIndex < 0 ? 0 : selectedIndex - LocationDropdownMaxRows / 2,
+                0,
+                this.GetMaxLocationScrollIndex()
+            );
+        }
+        else
+        {
+            this.locationSearchText = string.Empty;
+        }
+    }
+
+    private void SetLocation(string nextLocation)
+    {
+        if (string.IsNullOrWhiteSpace(nextLocation)
+            || nextLocation.Equals(this.state.Cutscene.LocationName, StringComparison.OrdinalIgnoreCase))
+        {
+            this.CloseLocationDropdown();
             return;
         }
 
+        this.CloseLocationDropdown();
         this.StopPlayback();
-        GameLocation? loaded = LocationBootstrapper.Load(nextLocation);
         this.state.Cutscene.LocationName = nextLocation;
-        this.state.BootstrappedMap = loaded;
+        LocationLoadResult loadResult = this.LoadPreviewLocation(nextLocation);
         this.state.IsDirty = true;
-        this.toolbarStatusMessage = loaded is null
-            ? $"Location '{nextLocation}' could not be previewed."
-            : $"Location set to {nextLocation}.";
+        this.toolbarStatusMessage = loadResult.Loaded
+            ? $"Location set to {nextLocation}."
+            : $"Location '{nextLocation}' preview failed: {this.TrimToolbarText(loadResult.FailureReason ?? "unknown reason", 70)}";
+    }
+
+    private LocationLoadResult LoadPreviewLocation(string locationName)
+    {
+        LocationLoadResult result = LocationBootstrapper.LoadDetailed(locationName);
+        this.state.BootstrappedMap = result.Location;
+        this.state.MapLoadFailureMessage = result.Loaded
+            ? string.Empty
+            : result.FailureReason ?? "Map could not be loaded for an unknown reason.";
+        return result;
+    }
+
+    private bool TryHandleLocationDropdownClick(int x, int y)
+    {
+        if (!this.locationDropdownOpen)
+        {
+            return false;
+        }
+
+        foreach ((Rectangle bounds, string locationName) in this.locationDropdownRows)
+        {
+            if (bounds.Contains(x, y))
+            {
+                this.SetLocation(locationName);
+                return true;
+            }
+        }
+
+        if (this.locationButtonBounds.Contains(x, y))
+        {
+            return false;
+        }
+
+        if (this.GetLocationDropdownBounds().Contains(x, y))
+        {
+            return true;
+        }
+
+        this.CloseLocationDropdown();
+        return false;
+    }
+
+    private void ScrollLocationDropdown(int direction)
+    {
+        int delta = direction > 0 ? -1 : 1;
+        this.locationDropdownScrollIndex = Math.Clamp(
+            this.locationDropdownScrollIndex + delta,
+            0,
+            this.GetMaxLocationScrollIndex()
+        );
+    }
+
+    private int GetMaxLocationScrollIndex()
+    {
+        return Math.Max(0, this.GetFilteredLocations().Count - LocationDropdownMaxRows);
+    }
+
+    private void CloseLocationDropdown()
+    {
+        this.locationDropdownOpen = false;
+        this.locationSearchText = string.Empty;
+        this.locationDropdownScrollIndex = 0;
+    }
+
+    private IReadOnlyList<string> GetFilteredLocations()
+    {
+        if (string.IsNullOrWhiteSpace(this.locationSearchText))
+        {
+            return LocationBootstrapper.SupportedLocations;
+        }
+
+        return LocationBootstrapper.SupportedLocations
+            .Where(name => name.Contains(this.locationSearchText, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private bool HandleLocationDropdownKey(Keys key)
+    {
+        if (key == Keys.Escape)
+        {
+            this.CloseLocationDropdown();
+            return true;
+        }
+
+        if (key == Keys.Enter)
+        {
+            IReadOnlyList<string> filteredLocations = this.GetFilteredLocations();
+            if (filteredLocations.Count > 0)
+            {
+                this.SetLocation(filteredLocations[Math.Clamp(this.locationDropdownScrollIndex, 0, filteredLocations.Count - 1)]);
+            }
+
+            return true;
+        }
+
+        if (key == Keys.Back)
+        {
+            if (this.locationSearchText.Length > 0)
+            {
+                this.locationSearchText = this.locationSearchText[..^1];
+                this.locationDropdownScrollIndex = 0;
+            }
+
+            return true;
+        }
+
+        if (key == Keys.Delete)
+        {
+            this.locationSearchText = string.Empty;
+            this.locationDropdownScrollIndex = 0;
+            return true;
+        }
+
+        char? character = GetLocationSearchCharacter(key);
+        if (character is null)
+        {
+            return false;
+        }
+
+        this.locationSearchText += character.Value;
+        this.locationDropdownScrollIndex = 0;
+        return true;
+    }
+
+    private static int FindLocationIndex(IReadOnlyList<string> locations, string locationName)
+    {
+        for (int index = 0; index < locations.Count; index++)
+        {
+            if (locations[index].Equals(locationName, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static char? GetLocationSearchCharacter(Keys key)
+    {
+        KeyboardState keyboardState = Keyboard.GetState();
+        bool shiftHeld = keyboardState.IsKeyDown(Keys.LeftShift)
+            || keyboardState.IsKeyDown(Keys.RightShift);
+
+        if (key is >= Keys.A and <= Keys.Z)
+        {
+            return (char)('a' + ((int)key - (int)Keys.A));
+        }
+
+        if (key is >= Keys.D0 and <= Keys.D9)
+        {
+            string normalDigits = "0123456789";
+            string shiftedDigits = ")!@#$%^&*(";
+            int index = (int)key - (int)Keys.D0;
+            return shiftHeld ? shiftedDigits[index] : normalDigits[index];
+        }
+
+        if (key is >= Keys.NumPad0 and <= Keys.NumPad9)
+        {
+            return (char)('0' + ((int)key - (int)Keys.NumPad0));
+        }
+
+        return key switch
+        {
+            Keys.Space => ' ',
+            Keys.OemMinus => shiftHeld ? '_' : '-',
+            Keys.OemPeriod => '.',
+            Keys.OemComma => ',',
+            Keys.OemPlus => shiftHeld ? '+' : '=',
+            Keys.OemQuestion => shiftHeld ? '?' : '/',
+            Keys.OemSemicolon => shiftHeld ? ':' : ';',
+            Keys.OemQuotes => shiftHeld ? '"' : '\'',
+            Keys.OemOpenBrackets => shiftHeld ? '{' : '[',
+            Keys.OemCloseBrackets => shiftHeld ? '}' : ']',
+            Keys.OemPipe => shiftHeld ? '|' : '\\',
+            _ => null
+        };
     }
 
     private void ImportCutscene(CutsceneData cutscene)
@@ -420,7 +673,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.state.Mode = EditorMode.Edit;
         this.state.UndoStack.Clear();
         this.state.RedoStack.Clear();
-        this.state.BootstrappedMap = LocationBootstrapper.Load(cutscene.LocationName);
+        this.LoadPreviewLocation(cutscene.LocationName);
         this.state.IsDirty = false;
         this.toolbarStatusMessage = $"Imported {cutscene.UniqueId}.";
     }
@@ -446,16 +699,22 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     {
         try
         {
-            GameLocation? location = this.state.BootstrappedMap ?? LocationBootstrapper.Load(this.state.Cutscene.LocationName);
+            GameLocation? location = this.state.BootstrappedMap ?? this.LoadPreviewLocation(this.state.Cutscene.LocationName).Location;
             if (location is null)
             {
-                this.toolbarStatusMessage = "Cannot play: map failed to load.";
+                this.toolbarStatusMessage = $"Cannot play: {this.TrimToolbarText(this.state.MapLoadFailureMessage, 80)}";
                 return;
             }
 
             this.previousPlayer = Game1.player;
             this.previousLocation = Game1.currentLocation;
             this.previousEventUp = Game1.eventUp;
+            this.previousGlobalFade = Game1.globalFade;
+            this.previousFadeIn = Game1.fadeIn;
+            this.previousFadeToBlack = Game1.fadeToBlack;
+            this.previousNonWarpFade = Game1.nonWarpFade;
+            this.previousFadeToBlackAlpha = Game1.fadeToBlackAlpha;
+            this.previousGlobalFadeSpeed = Game1.globalFadeSpeed;
             this.previewPlayerCreated = Game1.player is null;
             this.playbackBootstrapActive = true;
 
@@ -546,6 +805,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             this.RegisterPreviewEmotes(currentEvent, commandBeforeUpdate, commandBeforeUpdate + 1);
             currentEvent.Update(location, time);
             this.UpdatePreviewFarmerMovementAnimation(time);
+            this.UpdatePreviewGlobalFade(currentEvent);
             this.RegisterPreviewEmotes(currentEvent, commandBeforeUpdate, currentEvent.CurrentCommand);
             this.CapturePlaybackDialogue();
             if (!Game1.eventOver && currentEvent.CurrentCommand != commandBeforeUpdate)
@@ -594,6 +854,12 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         Game1.eventUp = this.previousEventUp;
         Game1.eventOver = false;
         Game1.pauseTime = 0f;
+        Game1.globalFade = this.previousGlobalFade;
+        Game1.fadeIn = this.previousFadeIn;
+        Game1.fadeToBlack = this.previousFadeToBlack;
+        Game1.nonWarpFade = this.previousNonWarpFade;
+        Game1.fadeToBlackAlpha = this.previousFadeToBlackAlpha;
+        Game1.globalFadeSpeed = this.previousGlobalFadeSpeed;
         this.state.Mode = EditorMode.Edit;
         this.state.PlaybackCommandIndex = -1;
 
@@ -619,11 +885,45 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.previousPlayerFacing = 2;
         this.previousLocation = null;
         this.previousEventUp = false;
+        this.previousGlobalFade = false;
+        this.previousFadeIn = false;
+        this.previousFadeToBlack = false;
+        this.previousNonWarpFade = false;
+        this.previousFadeToBlackAlpha = 0f;
+        this.previousGlobalFadeSpeed = 0f;
 
         if (!string.IsNullOrWhiteSpace(statusMessage))
         {
             this.toolbarStatusMessage = statusMessage;
         }
+    }
+
+    private void UpdatePreviewGlobalFade(Event currentEvent)
+    {
+        if (!Game1.globalFade)
+        {
+            return;
+        }
+
+        if (Game1.fadeIn)
+        {
+            if (Game1.fadeToBlackAlpha <= 0f)
+            {
+                currentEvent.incrementCommandAfterFade();
+                return;
+            }
+
+            Game1.fadeToBlackAlpha = Math.Max(0f, Game1.fadeToBlackAlpha - Game1.globalFadeSpeed);
+            return;
+        }
+
+        if (Game1.fadeToBlackAlpha >= 1f)
+        {
+            currentEvent.incrementCommandAfterFade();
+            return;
+        }
+
+        Game1.fadeToBlackAlpha = Math.Min(1f, Game1.fadeToBlackAlpha + Game1.globalFadeSpeed);
     }
 
     private bool HasActivePlaybackEmote(Event currentEvent)
@@ -912,20 +1212,21 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             Game1.textColor
         );
 
-        this.DrawToolbarButton(spriteBatch, new Rectangle(this.xPositionOnScreen + 190, this.yPositionOnScreen + 16, 72, 38), "New", this.NewCutscene);
-        this.DrawToolbarButton(spriteBatch, new Rectangle(this.xPositionOnScreen + 274, this.yPositionOnScreen + 16, 96, 38), "Location", () => this.CycleLocation(1), () => this.CycleLocation(-1));
+        int nextX = this.xPositionOnScreen + 28 + (int)Math.Ceiling(Game1.smallFont.MeasureString(title).X) + 36;
+        int buttonY = this.yPositionOnScreen + 16;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 72, 38), "New", this.NewCutscene);
+        nextX += 84;
 
-        Utility.drawTextWithShadow(
-            spriteBatch,
-            $"Location: {this.state.Cutscene.LocationName}",
-            Game1.smallFont,
-            new Vector2(this.xPositionOnScreen + 382, this.yPositionOnScreen + 24),
-            Game1.textColor
-        );
+        this.locationButtonBounds = new Rectangle(nextX, buttonY, 250, 38);
+        this.DrawToolbarButton(spriteBatch, this.locationButtonBounds, "Location: " + this.TrimToolbarText(this.state.Cutscene.LocationName, 18), this.ToggleLocationDropdown);
+        nextX += 262;
 
-        this.DrawToolbarButton(spriteBatch, new Rectangle(this.xPositionOnScreen + 580, this.yPositionOnScreen + 16, 96, 38), this.state.Mode == EditorMode.Play ? "Stop" : "Play", this.TogglePlayback);
-        this.DrawToolbarButton(spriteBatch, new Rectangle(this.xPositionOnScreen + 688, this.yPositionOnScreen + 16, 108, 38), "Import", this.OpenImportDialog);
-        this.DrawToolbarButton(spriteBatch, new Rectangle(this.xPositionOnScreen + 808, this.yPositionOnScreen + 16, 96, 38), "Save", this.OpenSaveDialog);
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 96, 38), this.state.Mode == EditorMode.Play ? "Stop" : "Play", this.TogglePlayback);
+        nextX += 108;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 108, 38), "Import", this.OpenImportDialog);
+        nextX += 120;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 96, 38), "Save", this.OpenSaveDialog);
+        nextX += 108;
 
         if (!string.IsNullOrWhiteSpace(this.toolbarStatusMessage))
         {
@@ -933,10 +1234,11 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 spriteBatch,
                 this.toolbarStatusMessage,
                 Game1.smallFont,
-                new Vector2(this.xPositionOnScreen + 916, this.yPositionOnScreen + 24),
+                new Vector2(nextX, this.yPositionOnScreen + 24),
                 Color.DarkGreen
             );
         }
+
     }
 
     private void DrawToolbarButton(SpriteBatch spriteBatch, Rectangle bounds, string label, Action leftClick, Action? rightClick = null)
@@ -951,6 +1253,114 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             Game1.textColor
         );
         this.toolbarButtons.Add((bounds, leftClick, rightClick));
+    }
+
+    private void DrawLocationDropdown(SpriteBatch spriteBatch)
+    {
+        this.locationDropdownRows.Clear();
+
+        IReadOnlyList<string> locations = this.GetFilteredLocations();
+        if (LocationBootstrapper.SupportedLocations.Count == 0)
+        {
+            return;
+        }
+
+        this.locationDropdownScrollIndex = Math.Clamp(this.locationDropdownScrollIndex, 0, this.GetMaxLocationScrollIndex());
+        Rectangle dropdownBounds = this.GetLocationDropdownBounds();
+        IClickableMenu.drawTextureBox(spriteBatch, dropdownBounds.X, dropdownBounds.Y, dropdownBounds.Width, dropdownBounds.Height, Color.White);
+
+        Rectangle searchBounds = new(
+            dropdownBounds.X + 12,
+            dropdownBounds.Y + 12,
+            dropdownBounds.Width - 24,
+            LocationSearchHeight - 8
+        );
+        spriteBatch.Draw(Game1.staminaRect, searchBounds, Color.White * 0.45f);
+        string searchLabel = string.IsNullOrEmpty(this.locationSearchText)
+            ? "Type to search locations..."
+            : this.locationSearchText;
+        Utility.drawTextWithShadow(
+            spriteBatch,
+            this.TrimToolbarText(searchLabel, 30),
+            Game1.smallFont,
+            new Vector2(searchBounds.X + 8, searchBounds.Y + 5),
+            string.IsNullOrEmpty(this.locationSearchText) ? Color.DimGray : Game1.textColor
+        );
+
+        if (locations.Count == 0)
+        {
+            Utility.drawTextWithShadow(
+                spriteBatch,
+                "No matches.",
+                Game1.smallFont,
+                new Vector2(dropdownBounds.X + 20, dropdownBounds.Y + LocationSearchHeight + 16),
+                Color.DarkRed
+            );
+            return;
+        }
+
+        int visibleRows = Math.Min(LocationDropdownMaxRows, locations.Count);
+        for (int rowIndex = 0; rowIndex < visibleRows; rowIndex++)
+        {
+            int locationIndex = this.locationDropdownScrollIndex + rowIndex;
+            if (locationIndex >= locations.Count)
+            {
+                break;
+            }
+
+            string locationName = locations[locationIndex];
+            Rectangle rowBounds = new(
+                dropdownBounds.X + 12,
+                dropdownBounds.Y + LocationSearchHeight + 12 + rowIndex * LocationDropdownRowHeight,
+                dropdownBounds.Width - 24,
+                LocationDropdownRowHeight
+            );
+
+            if (locationName.Equals(this.state.Cutscene.LocationName, StringComparison.OrdinalIgnoreCase))
+            {
+                spriteBatch.Draw(Game1.staminaRect, rowBounds, Color.LightGoldenrodYellow * 0.7f);
+            }
+
+            Utility.drawTextWithShadow(
+                spriteBatch,
+                this.TrimToolbarText(locationName, 28),
+                Game1.smallFont,
+                new Vector2(rowBounds.X + 8, rowBounds.Y + 6),
+                Game1.textColor
+            );
+            this.locationDropdownRows.Add((rowBounds, locationName));
+        }
+
+        if (locations.Count > LocationDropdownMaxRows)
+        {
+            string scrollText = $"{this.locationDropdownScrollIndex + 1}-{Math.Min(locations.Count, this.locationDropdownScrollIndex + LocationDropdownMaxRows)} / {locations.Count}";
+            Vector2 size = Game1.smallFont.MeasureString(scrollText);
+            Utility.drawTextWithShadow(
+                spriteBatch,
+                scrollText,
+                Game1.smallFont,
+                new Vector2(dropdownBounds.Right - size.X - 18, dropdownBounds.Bottom - 28),
+                Color.DimGray
+            );
+        }
+    }
+
+    private Rectangle GetLocationDropdownBounds()
+    {
+        IReadOnlyList<string> locations = this.GetFilteredLocations();
+        int visibleRows = Math.Min(LocationDropdownMaxRows, Math.Max(1, locations.Count));
+        int height = LocationSearchHeight + 24 + visibleRows * LocationDropdownRowHeight + (locations.Count > LocationDropdownMaxRows ? 28 : 0);
+        return new Rectangle(this.locationButtonBounds.X, this.locationButtonBounds.Bottom + 4, 340, height);
+    }
+
+    private string TrimToolbarText(string text, int maxLength)
+    {
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        return text[..Math.Max(0, maxLength - 3)] + "...";
     }
 
     private static int WrapIndex(int index, int count)

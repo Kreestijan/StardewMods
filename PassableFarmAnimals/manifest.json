@@ -1,0 +1,18 @@
+{
+  "Name": "Passable Farm Animals",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Lets the farmer walk through farm animals without collision.",
+  "UniqueID": "Kree.PassableFarmAnimals",
+  "EntryDll": "PassableFarmAnimals.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": [
+    "Nexus:YOUR_MOD_ID"
+  ],
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
+}

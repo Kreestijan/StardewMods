@@ -14,6 +14,7 @@ public static class EventScriptParser
         "precisePause",
         "globalFade",
         "globalFadeIn",
+        "globalFadeToClear",
         "addItem",
         "addMoney",
         "friendship",
@@ -191,6 +192,7 @@ public static class EventScriptParser
                 return new TimelineCommand { Type = CommandType.FadeOut };
 
             case "globalFadeIn":
+            case "globalFadeToClear":
                 return new TimelineCommand { Type = CommandType.FadeIn };
 
             case "addItem" when parts.Length >= 2:

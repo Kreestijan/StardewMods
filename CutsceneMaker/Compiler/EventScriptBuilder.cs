@@ -103,7 +103,7 @@ public static class EventScriptBuilder
                 return SingleCommand("globalFade");
 
             case CommandType.FadeIn:
-                return SingleCommand("globalFadeIn");
+                return SingleCommand("globalFadeToClear");
 
             case CommandType.Reward:
                 return SingleCommand(CompileReward(command));

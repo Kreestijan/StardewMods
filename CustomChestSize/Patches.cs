@@ -52,7 +52,18 @@ internal static class Patches
     [HarmonyPatch(typeof(Chest), nameof(Chest.GetActualCapacity))]
     private static void Chest_GetActualCapacity_Postfix(Chest __instance, ref int __result)
     {
-        if (suppressCustomCapacityDepth <= 0 && !ModEntry.IsUnlimitedStorageLoaded() && Game1.gameMode == 3)
+        if (suppressCustomCapacityDepth > 0)
+        {
+            return;
+        }
+
+        if (ModEntry.TryGetAutoGrabberLayout(__instance, out ChestGridLayout autoGrabberLayout))
+        {
+            __result = autoGrabberLayout.Capacity;
+            return;
+        }
+
+        if (!ModEntry.IsUnlimitedStorageLoaded() && Game1.gameMode == 3)
         {
             __result = ModEntry.GetConfiguredCapacity(__instance, __result);
         }

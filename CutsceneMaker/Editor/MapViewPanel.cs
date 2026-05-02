@@ -37,7 +37,10 @@ public sealed class MapViewPanel : EditorPanel
 
         if (this.state.BootstrappedMap is null)
         {
-            this.DrawWarning(spriteBatch, contentBounds, "Could not load this map. Play mode disabled.");
+            string reason = string.IsNullOrWhiteSpace(this.state.MapLoadFailureMessage)
+                ? "No loader reason was recorded."
+                : this.state.MapLoadFailureMessage;
+            this.DrawWarning(spriteBatch, contentBounds, $"Could not preview this map: {TrimWarning(reason)}\nPlay mode disabled.");
             return;
         }
 
@@ -48,6 +51,7 @@ public sealed class MapViewPanel : EditorPanel
         }
 
         this.DrawCursorTile(spriteBatch, contentBounds);
+        this.DrawPlaybackFadeOverlay(spriteBatch, contentBounds);
     }
 
     public override void ReceiveLeftClick(int x, int y)
@@ -163,13 +167,14 @@ public sealed class MapViewPanel : EditorPanel
         }
         catch (Exception ex)
         {
+            this.state.MapLoadFailureMessage = $"Map draw failed: {FormatException(ex)}";
             if (!this.loggedMapDrawFailure)
             {
                 this.loggedMapDrawFailure = true;
                 ModEntry.Instance.Monitor.Log($"Cutscene Maker map draw failed: {ex}", LogLevel.Warn);
             }
 
-            this.DrawWarning(spriteBatch, contentBounds, "Map draw failed. Play mode disabled.");
+            this.DrawWarning(spriteBatch, contentBounds, $"{TrimWarning(this.state.MapLoadFailureMessage)}\nPlay mode disabled.");
         }
         finally
         {
@@ -233,6 +238,22 @@ public sealed class MapViewPanel : EditorPanel
 
             spriteBatch.Draw(Game1.emoteSpriteSheet, position, source, Color.White, 0f, Vector2.Zero, Game1.pixelZoom, SpriteEffects.None, 1f);
         }
+    }
+
+    private void DrawPlaybackFadeOverlay(SpriteBatch spriteBatch, Microsoft.Xna.Framework.Rectangle contentBounds)
+    {
+        if (this.state.Mode != EditorMode.Play || (!Game1.globalFade && !Game1.fadeToBlack))
+        {
+            return;
+        }
+
+        float alpha = Math.Clamp(Game1.fadeToBlackAlpha, 0f, 1f);
+        if (alpha <= 0f)
+        {
+            return;
+        }
+
+        spriteBatch.Draw(Game1.fadeToBlackRect, contentBounds, Color.Black * alpha);
     }
 
     private bool TryGetEditorActorPosition(string actorName, xTile.Dimensions.Rectangle viewport, out Vector2 position)
@@ -546,5 +567,20 @@ public sealed class MapViewPanel : EditorPanel
             new Vector2(contentBounds.X + 24, contentBounds.Y + 24),
             Color.Red
         );
+    }
+
+    private static string FormatException(Exception ex)
+    {
+        return string.IsNullOrWhiteSpace(ex.Message)
+            ? ex.GetType().Name
+            : $"{ex.GetType().Name}: {ex.Message}";
+    }
+
+    private static string TrimWarning(string text)
+    {
+        const int maxLength = 160;
+        return text.Length <= maxLength
+            ? text
+            : text[..(maxLength - 3)] + "...";
     }
 }

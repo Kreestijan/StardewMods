@@ -111,6 +111,9 @@ public sealed class ModEntry : Mod
         );
 
         helper.Events.GameLoop.GameLaunched += this.OnGameLaunched;
+        helper.Events.GameLoop.SaveLoaded += this.OnSaveLoaded;
+        helper.Events.World.LocationListChanged += this.OnLocationListChanged;
+        helper.Events.World.ObjectListChanged += this.OnObjectListChanged;
     }
 
     internal static bool TryGetConfiguredLayout(Chest chest, out ChestGridLayout layout)
@@ -123,6 +126,21 @@ public sealed class ModEntry : Mod
         return TryGetConfiguredLayout(chest, out ChestGridLayout layout)
             ? layout.Capacity
             : fallbackCapacity;
+    }
+
+    internal static bool TryGetAutoGrabberLayout(Chest chest, out ChestGridLayout layout)
+    {
+        if (!TryGetAutoGrabberOwner(chest, out _))
+        {
+            layout = default;
+            return false;
+        }
+
+        lock (ConfigLock)
+        {
+            layout = new ChestGridLayout(Instance.config.AutoGrabberColumns, Instance.config.AutoGrabberRows);
+            return true;
+        }
     }
 
     internal static void ApplyLayoutIfNeeded(ItemGrabMenu menu)
@@ -300,6 +318,32 @@ public sealed class ModEntry : Mod
         this.PatchCategorizeChestsCompatibility();
         this.PatchRemoteFridgeStorageCompatibility();
         this.InitUnlimitedStorageCompatibility();
+    }
+
+    private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e)
+    {
+        this.RegisterAutoGrabbersInLoadedLocations();
+    }
+
+    private void OnLocationListChanged(object? sender, LocationListChangedEventArgs e)
+    {
+        foreach (GameLocation location in e.Added)
+        {
+            this.RegisterAutoGrabbersInLocation(location);
+        }
+    }
+
+    private void OnObjectListChanged(object? sender, ObjectListChangedEventArgs e)
+    {
+        foreach (KeyValuePair<Vector2, StardewValley.Object> pair in e.Added)
+        {
+            RegisterAutoGrabberInternalChest(pair.Value);
+        }
+
+        foreach (KeyValuePair<Vector2, StardewValley.Object> pair in e.Removed)
+        {
+            UnregisterAutoGrabberInternalChest(pair.Value);
+        }
     }
 
     private void RegisterGenericModConfigMenu()
@@ -708,6 +752,12 @@ public sealed class ModEntry : Mod
         {
             this.LogDebug($"[TryGetConfiguredLayoutCore] chest ItemId={chest.ItemId} Name={chest.Name} SpecialChestType={chest.SpecialChestType} playerChest={chest.playerChest.Value}");
 
+            if (TryGetAutoGrabberLayout(chest, out layout))
+            {
+                this.LogDebug($"[TryGetConfiguredLayoutCore] Selected AUTO-GRABBER layout: {layout.Columns}x{layout.Rows}");
+                return true;
+            }
+
             // Note: ItemId is used to distinguish chest types because some mods may set
             // SpecialChestType to BigChest on all player chests.
             switch (chest.ItemId)
@@ -767,26 +817,9 @@ public sealed class ModEntry : Mod
 
     private void ApplyLayoutIfNeededCore(ItemGrabMenu menu)
     {
-        // Auto-Grabber path: always check first regardless of source, since some
-        // menu reconstructions (e.g. shift-click transfer) use source_farmhand.
-        if (IsAutoGrabber(menu.sourceItem) || IsAutoGrabber(menu.context))
+        if (TryResolveAutoGrabberMenu(menu, out Chest autoGrabberChest, out StardewValley.Object autoGrabber))
         {
-            this.ApplyAutoGrabberLayout(menu);
-            return;
-        }
-
-        if (TryGetLayoutState(menu, out ChestMenuLayoutState existingState) && existingState.IsAutoGrabber)
-        {
-            this.ApplyAutoGrabberLayout(menu);
-            return;
-        }
-
-        // Fallback: when SDV reconstructs the menu (e.g. on item transfers), the new
-        // instance loses the auto-grabber as context. Check if the sourceItem is a
-        // chest we've previously identified as an auto-grabber's internal chest.
-        if (menu.sourceItem is Chest sourceChest && AutoGrabberChests.TryGetValue(sourceChest, out _))
-        {
-            this.ApplyAutoGrabberLayout(menu);
+            this.ApplyAutoGrabberLayout(menu, autoGrabberChest, autoGrabber);
             return;
         }
 
@@ -893,7 +926,7 @@ public sealed class ModEntry : Mod
         this.ReanchorColorPickerStripCore(menu, chestPanelTop);
     }
 
-    private void ApplyAutoGrabberLayout(ItemGrabMenu menu)
+    private void ApplyAutoGrabberLayout(ItemGrabMenu menu, Chest internalChest, StardewValley.Object owner)
     {
         int cols;
         int rows;
@@ -903,7 +936,7 @@ public sealed class ModEntry : Mod
             rows = this.config.AutoGrabberRows;
         }
 
-        IList<Item> items = menu.ItemsToGrabMenu.actualInventory;
+        IList<Item> items = internalChest.Items;
         int itemCount = items.Count(item => item is not null);
         int visibleRows = rows;
         int visibleCapacity = cols * rows;
@@ -913,6 +946,8 @@ public sealed class ModEntry : Mod
             visibleRows = (itemCount + cols - 1) / cols;
             visibleCapacity = visibleRows * cols;
         }
+
+        EnsureInventoryCapacity(items, visibleCapacity);
 
         int menuWidth = System.Math.Max(
             DefaultMenuWidth,
@@ -981,20 +1016,7 @@ public sealed class ModEntry : Mod
         });
         this.ReanchorColorPickerStripCore(menu, chestPanelTop);
 
-        // Track the internal chest so reconstructed menus can still identify
-        // this as an auto-grabber layout.
-        StardewValley.Object? grabber = menu.context as StardewValley.Object ?? menu.sourceItem as StardewValley.Object;
-        if (grabber?.ItemId == "165" && grabber.heldObject.Value is Chest internalChest)
-        {
-            AutoGrabberChests.GetValue(internalChest, _ => grabber);
-        }
-
-        // Restore auto-grabber menu identity if it was lost during reconstruction.
-        // Chest.ShowMenu() sets context=chest which breaks other mods' detection.
-        if (menu.context is not StardewValley.Object ctxObj || ctxObj.ItemId != "165")
-        {
-            RestoreAutoGrabberMenuIdentity(menu);
-        }
+        RestoreAutoGrabberMenuIdentity(menu, internalChest, owner);
 
         // Remove color picker — ShowMenu() creates one when sourceItem is a Chest
         menu.chestColorPicker = null;
@@ -1006,30 +1028,22 @@ public sealed class ModEntry : Mod
         }
     }
 
-    private static void RestoreAutoGrabberMenuIdentity(ItemGrabMenu menu)
+    private static void RestoreAutoGrabberMenuIdentity(ItemGrabMenu menu, Chest internalChest, StardewValley.Object owner)
     {
-        Chest? internalChest = menu.sourceItem as Chest ?? menu.context as Chest;
-        if (internalChest is null || !AutoGrabberChests.TryGetValue(internalChest, out StardewValley.Object? grabber) || grabber is null)
-        {
-            return;
-        }
+        RegisterAutoGrabberInternalChest(owner);
 
         // Restore context so other mods see this as an auto-grabber
-        menu.context = grabber;
+        menu.context = owner;
 
         // Restore behaviorOnItemGrab so taking items out uses auto-grabber logic
         MethodInfo? grabMethod = AccessTools.Method(typeof(StardewValley.Object), "grabItemFromAutoGrabber");
         if (grabMethod is not null)
         {
             menu.behaviorOnItemGrab = (ItemGrabMenu.behaviorOnItemSelect)
-                Delegate.CreateDelegate(typeof(ItemGrabMenu.behaviorOnItemSelect), grabber, grabMethod);
+                Delegate.CreateDelegate(typeof(ItemGrabMenu.behaviorOnItemSelect), owner, grabMethod);
         }
 
-        // Ensure sourceItem points to the auto-grabber, not the internal chest
-        if (menu.sourceItem is not StardewValley.Object obj || obj.ItemId != "165")
-        {
-            menu.sourceItem = grabber;
-        }
+        menu.sourceItem = owner;
     }
 
     private static int SafeAdd(int value, int addend)
@@ -1040,6 +1054,14 @@ public sealed class ModEntry : Mod
         if (addend < 0 && result > value)
             return int.MinValue;
         return result;
+    }
+
+    private static void EnsureInventoryCapacity(IList<Item> items, int capacity)
+    {
+        while (items.Count < capacity)
+        {
+            items.Add(null!);
+        }
     }
 
     private void PrepareChestClickableComponents(ItemGrabMenu menu)
@@ -1501,7 +1523,122 @@ public sealed class ModEntry : Mod
 
     internal static bool IsAutoGrabber(object? target)
     {
-        return target is StardewValley.Object obj && obj.ItemId == "165";
+        return IsAutoGrabberObject(target);
+    }
+
+    private static bool IsAutoGrabberObject(object? target)
+    {
+        return target is StardewValley.Object obj && (obj.QualifiedItemId == "(BC)165" || obj.ParentSheetIndex == 165);
+    }
+
+    internal static bool TryGetAutoGrabberOwner(Chest chest, out StardewValley.Object owner)
+    {
+        if (AutoGrabberChests.TryGetValue(chest, out StardewValley.Object? existingOwner) && existingOwner is not null)
+        {
+            owner = existingOwner;
+            return true;
+        }
+
+        return TryRegisterAutoGrabberHoldingChest(chest, out owner);
+    }
+
+    private static bool TryResolveAutoGrabberMenu(ItemGrabMenu menu, out Chest internalChest, out StardewValley.Object owner)
+    {
+        if (TryResolveAutoGrabberValue(menu.context, out internalChest, out owner))
+        {
+            return true;
+        }
+
+        if (TryResolveAutoGrabberValue(menu.sourceItem, out internalChest, out owner))
+        {
+            return true;
+        }
+
+        internalChest = null!;
+        owner = null!;
+        return false;
+    }
+
+    private static bool TryResolveAutoGrabberValue(object? value, out Chest internalChest, out StardewValley.Object owner)
+    {
+        if (value is StardewValley.Object obj && IsAutoGrabberObject(obj) && obj.heldObject.Value is Chest heldChest)
+        {
+            RegisterAutoGrabberInternalChest(obj);
+            internalChest = heldChest;
+            owner = obj;
+            return true;
+        }
+
+        if (value is Chest chest && TryGetAutoGrabberOwner(chest, out owner))
+        {
+            internalChest = chest;
+            return true;
+        }
+
+        internalChest = null!;
+        owner = null!;
+        return false;
+    }
+
+    private void RegisterAutoGrabbersInLoadedLocations()
+    {
+        foreach (GameLocation location in Game1.locations)
+        {
+            this.RegisterAutoGrabbersInLocation(location);
+        }
+    }
+
+    private void RegisterAutoGrabbersInLocation(GameLocation location)
+    {
+        foreach (KeyValuePair<Vector2, StardewValley.Object> pair in location.Objects.Pairs)
+        {
+            RegisterAutoGrabberInternalChest(pair.Value);
+        }
+    }
+
+    private static bool RegisterAutoGrabberInternalChest(object? target)
+    {
+        if (target is not StardewValley.Object obj || !IsAutoGrabberObject(obj) || obj.heldObject.Value is not Chest internalChest)
+        {
+            return false;
+        }
+
+        AutoGrabberChests.GetValue(internalChest, _ => obj);
+        return true;
+    }
+
+    private static bool TryRegisterAutoGrabberHoldingChest(Chest chest, out StardewValley.Object owner)
+    {
+        if (!Context.IsWorldReady)
+        {
+            owner = null!;
+            return false;
+        }
+
+        foreach (GameLocation location in Game1.locations)
+        {
+            foreach (KeyValuePair<Vector2, StardewValley.Object> pair in location.Objects.Pairs)
+            {
+                StardewValley.Object obj = pair.Value;
+                if (IsAutoGrabberObject(obj) && ReferenceEquals(obj.heldObject.Value, chest))
+                {
+                    AutoGrabberChests.GetValue(chest, _ => obj);
+                    owner = obj;
+                    return true;
+                }
+            }
+        }
+
+        owner = null!;
+        return false;
+    }
+
+    private static void UnregisterAutoGrabberInternalChest(object? target)
+    {
+        if (target is StardewValley.Object obj && IsAutoGrabberObject(obj) && obj.heldObject.Value is Chest internalChest)
+        {
+            AutoGrabberChests.Remove(internalChest);
+        }
     }
 
     internal static bool TryGetLayoutState(ItemGrabMenu menu, out ChestMenuLayoutState state)
