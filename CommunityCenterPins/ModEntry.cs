@@ -1,4 +1,3 @@
-using HarmonyLib;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -48,19 +47,6 @@ public sealed class ModEntry : Mod
         helper.Events.GameLoop.Saving += this.OnSaving;
         helper.Events.GameLoop.ReturnedToTitle += this.OnReturnedToTitle;
         helper.Events.GameLoop.UpdateTicked += this.OnUpdateTicked;
-
-        try
-        {
-            Harmony harmony = new(this.ModManifest.UniqueID);
-            harmony.Patch(
-                original: AccessTools.Method(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.draw), new[] { typeof(SpriteBatch) }),
-                postfix: new HarmonyMethod(typeof(ModEntry), nameof(JunimoNoteMenu_Draw_Postfix))
-            );
-        }
-        catch (Exception ex)
-        {
-            this.Monitor.Log($"Failed to apply JunimoNoteMenu.draw postfix: {ex.Message}", LogLevel.Error);
-        }
     }
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
@@ -523,32 +509,6 @@ public sealed class ModEntry : Mod
         }
 
         this.dragMoved = false;
-    }
-
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(JunimoNoteMenu), nameof(JunimoNoteMenu.draw))]
-    private static void JunimoNoteMenu_Draw_Postfix(JunimoNoteMenu __instance, SpriteBatch b)
-    {
-        if (instance is null || !Context.IsWorldReady || __instance is null)
-        {
-            return;
-        }
-
-        if (!__instance.specificBundlePage || __instance.currentPageBundle is null)
-        {
-            return;
-        }
-
-        Rectangle buttonBounds = instance.GetPinButtonBounds(__instance);
-        bool alreadyPinned = instance.overlays.Any(overlay => overlay.BundleIndex == __instance.currentPageBundle.bundleIndex);
-        instance.DrawPinButton(b, buttonBounds, alreadyPinned);
-
-        if (instance.config.DebugHitboxes)
-        {
-            instance.DrawDebugRectangle(b, buttonBounds, Color.Gold * 0.45f);
-        }
-
-        instance.pinButtonBounds = buttonBounds;
     }
 
     private CommunityCenterPinsSaveData ReadPersistedSaveData()
