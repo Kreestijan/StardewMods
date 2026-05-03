@@ -1,4 +1,5 @@
 using HarmonyLib;
+using Microsoft.Xna.Framework;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
@@ -23,9 +24,41 @@ public sealed class ModEntry : Mod
         this.config = helper.ReadConfig<ModConfig>();
 
         this.harmony = new Harmony(this.ModManifest.UniqueID);
-        this.harmony.PatchAll();
+        ApplyHarmonyPatches(this.harmony);
 
         helper.Events.GameLoop.GameLaunched += this.OnGameLaunched;
+    }
+
+    private void ApplyHarmonyPatches(Harmony harmony)
+    {
+        var paramTypes = new[] {
+            typeof(Rectangle),
+            typeof(xTile.Dimensions.Rectangle),
+            typeof(bool),
+            typeof(int),
+            typeof(bool),
+            typeof(Character),
+            typeof(bool),
+            typeof(bool),
+            typeof(bool),
+            typeof(bool)
+        };
+
+        var glTarget = AccessTools.Method(typeof(GameLocation), nameof(GameLocation.isCollidingPosition), paramTypes);
+        if (glTarget is not null)
+        {
+            harmony.Patch(glTarget, transpiler: new HarmonyMethod(typeof(FarmAnimalCollisionPatch), nameof(FarmAnimalCollisionPatch.ApplyTranspiler)));
+        }
+        else
+        {
+            this.Monitor.Log("Could not find GameLocation.isCollidingPosition to patch.", LogLevel.Error);
+        }
+
+        var farmTarget = AccessTools.Method(typeof(Farm), nameof(Farm.isCollidingPosition), paramTypes);
+        if (farmTarget is not null)
+        {
+            harmony.Patch(farmTarget, transpiler: new HarmonyMethod(typeof(FarmAnimalCollisionPatch), nameof(FarmAnimalCollisionPatch.ApplyTranspiler)));
+        }
     }
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)

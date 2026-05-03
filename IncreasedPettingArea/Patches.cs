@@ -6,7 +6,7 @@ namespace IncreasedPettingArea;
 
 /// <summary>
 /// After the farmer pets an animal, also pet all un-petted animals
-/// within the configured radius.
+/// within the configured radius. Works on both Farm and AnimalHouse locations.
 /// </summary>
 [HarmonyPatch(typeof(FarmAnimal), nameof(FarmAnimal.pet))]
 internal static class FarmAnimalPetPatch
@@ -18,7 +18,10 @@ internal static class FarmAnimalPetPatch
         if (!ModEntry.Instance.Config.EnableMod || is_auto_pet || _isPettingNearby)
             return;
 
-        if (who is null || who.currentLocation is not Farm farm)
+        if (who is null || who != Game1.player)
+            return;
+
+        if (who.currentLocation is not { } loc || loc.Animals.Length <= 0)
             return;
 
         int radius = ModEntry.Instance.Config.PetRadius;
@@ -28,7 +31,7 @@ internal static class FarmAnimalPetPatch
         _isPettingNearby = true;
         try
         {
-            foreach (var pair in farm.Animals.Pairs)
+            foreach (var pair in loc.Animals.Pairs)
             {
                 FarmAnimal animal = pair.Value;
 
@@ -41,7 +44,9 @@ internal static class FarmAnimalPetPatch
                 if (dx * dx + dy * dy > radiusSquared)
                     continue;
 
-                animal.pet(who, is_auto_pet: false);
+                // Use is_auto_pet: true so nearby animals get petted silently
+                // (friendship/happiness only, no animation/sound per animal)
+                animal.pet(who, is_auto_pet: true);
             }
         }
         finally

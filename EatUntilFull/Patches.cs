@@ -116,11 +116,17 @@ internal static class Patches
         Object food = _pendingFood;
         _pendingFood = null;
 
-        // SDV recovery formulas (mirrors Object.staminaRecovered / healthRecovered)
-        int staminaPerItem = Math.Max(1, (int)(food.Edibility * 2.5f + 30f));
-        int healthPerItem = Math.Max(1, staminaPerItem / 2);
-        int available = food.Stack;
+        // Use SDV's own recovery formulas which account for quality and special items
+        int staminaPerItem = food.staminaRecoveredOnConsumption();
+        int healthPerItem = food.healthRecoveredOnConsumption();
 
+        if (staminaPerItem <= 0 && healthPerItem <= 0)
+        {
+            ShowTransientMessage(ModEntry.Instance.Translate("message.no-benefit"));
+            return;
+        }
+
+        int available = food.Stack;
         if (available <= 0)
             return;
 
@@ -129,6 +135,12 @@ internal static class Patches
 
         if (config.FillTarget == FillTarget.Energy)
         {
+            if (staminaPerItem <= 0)
+            {
+                ShowTransientMessage(ModEntry.Instance.Translate("message.no-energy"));
+                return;
+            }
+
             float deficit = Game1.player.maxStamina.Value - Game1.player.stamina;
             if (deficit <= 0f)
             {
@@ -139,6 +151,12 @@ internal static class Patches
         }
         else
         {
+            if (healthPerItem <= 0)
+            {
+                ShowTransientMessage(ModEntry.Instance.Translate("message.no-health"));
+                return;
+            }
+
             float deficit = Game1.player.maxHealth - Game1.player.health;
             if (deficit <= 0f)
             {
@@ -152,22 +170,34 @@ internal static class Patches
             return;
 
         int toEat = Math.Min(needed, available);
+        int silentEat = toEat - 1;
 
-        // Silently consume all but the last item (just stats, no animation)
-        for (int i = 1; i < toEat; i++)
+        // Apply stamina and health for silently consumed items
+        // (the last item's recovery is applied by doneEating() after eatObject)
+        if (silentEat > 0)
         {
             Game1.player.stamina = Math.Min(
                 Game1.player.maxStamina.Value,
-                Game1.player.stamina + staminaPerItem
+                Game1.player.stamina + staminaPerItem * silentEat
             );
             Game1.player.health = Math.Min(
                 Game1.player.maxHealth,
-                Game1.player.health + healthPerItem
+                Game1.player.health + healthPerItem * silentEat
             );
-            food.Stack--;
+
+            // Reduce item stack in inventory.
+            // Items[slot] = null triggers a NetRef change that syncs in multiplayer.
+            // Partial consumption (remaining stack > 0) is local-only, same as vanilla SDV.
+            int slot = Game1.player.Items.IndexOf(food);
+            if (slot >= 0)
+            {
+                food.Stack -= silentEat;
+                if (food.Stack <= 0)
+                    Game1.player.Items[slot] = null;
+            }
         }
 
-        // Eat the last one with full animation, sound, and inventory removal
+        // Eat the last one with full animation, sound, network event, and inventory removal
         Game1.player.eatObject(food);
 
         Game1.addHUDMessage(new HUDMessage(
