@@ -9,7 +9,7 @@ namespace PassableFarmAnimals;
 /// so they don't block collision detection. Restore them immediately after
 /// and nudge any animal the farmer walked into.
 /// </summary>
-[HarmonyPatch(typeof(GameLocation), nameof(GameLocation.isCollidingPosition))]
+[HarmonyPatch(typeof(GameLocation), nameof(GameLocation.isCollidingPosition), typeof(Rectangle), typeof(xTile.Dimensions.Rectangle), typeof(bool), typeof(int), typeof(bool), typeof(Character))]
 internal static class FarmAnimalCollisionPatch
 {
     private static KeyValuePair<long, FarmAnimal>[]? _savedPairs;
