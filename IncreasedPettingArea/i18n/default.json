@@ -1,0 +1,6 @@
+{
+  "gmcm.enable-mod.name": "Enable mod",
+  "gmcm.enable-mod.tooltip": "Pets all animals within radius when you pet one.",
+  "gmcm.pet-radius.name": "Pet radius",
+  "gmcm.pet-radius.tooltip": "Tile radius around the clicked animal to also pet."
+}

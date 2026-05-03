@@ -12,6 +12,9 @@ public sealed class ModEntry : Mod
 
     internal ModConfig Config { get; private set; } = new();
 
+    internal string Translate(string key) =>
+        this.Helper.Translation.Get(key);
+
     private Harmony? harmony;
 
     public override void Entry(IModHelper helper)
@@ -44,16 +47,16 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.Config.EnableMod,
             setValue: value => this.Config.EnableMod = value,
-            name: () => "Enable mod",
-            tooltip: () => "Pets all animals within radius when you pet one."
+            name: () => this.Translate("gmcm.enable-mod.name"),
+            tooltip: () => this.Translate("gmcm.enable-mod.tooltip")
         );
 
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.Config.PetRadius,
             setValue: value => this.Config.PetRadius = value,
-            name: () => "Pet radius",
-            tooltip: () => "Tile radius around the clicked animal to also pet.",
+            name: () => this.Translate("gmcm.pet-radius.name"),
+            tooltip: () => this.Translate("gmcm.pet-radius.tooltip"),
             min: 3,
             max: 20,
             interval: 1
