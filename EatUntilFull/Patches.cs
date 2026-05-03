@@ -56,9 +56,9 @@ internal static class Patches
     /// </summary>
     [HarmonyPrefix]
     [HarmonyPatch(typeof(GameLocation), nameof(GameLocation.answerDialogue))]
-    private static bool GameLocation_answerDialogue_Prefix(Response response)
+    private static bool GameLocation_answerDialogue_Prefix(Response answer)
     {
-        if (response.responseKey != "EatUntilFull")
+        if (answer.responseKey != "EatUntilFull")
             return true;
 
         HandleEatUntilFull();
