@@ -773,22 +773,6 @@ public sealed class ModEntry : Mod
                 return true;
             }
 
-            if (chest.fridge.Value)
-            {
-                if (IsBuiltInLocationFridge(chest))
-                {
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected FRIDGE layout: {this.config.FridgeColumns}x{this.config.FridgeRows}");
-                    layout = new ChestGridLayout(this.config.FridgeColumns, this.config.FridgeRows);
-                }
-                else
-                {
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected MINI-FRIDGE layout: {this.config.MiniFridgeColumns}x{this.config.MiniFridgeRows}");
-                    layout = new ChestGridLayout(this.config.MiniFridgeColumns, this.config.MiniFridgeRows);
-                }
-
-                return true;
-            }
-
             // Note: ItemId is used to distinguish chest types because some mods may set
             // SpecialChestType to BigChest on all player chests.
             switch (chest.ItemId)
@@ -814,7 +798,7 @@ public sealed class ModEntry : Mod
                     return true;
 
                 case "216":
-                    if (IsBuiltInLocationFridge(chest))
+                    if (chest.Location is FarmHouse farmHouse && farmHouse.fridge.Value == chest)
                     {
                         this.LogDebug($"[TryGetConfiguredLayoutCore] Selected FRIDGE layout: {this.config.FridgeColumns}x{this.config.FridgeRows}");
                         layout = new ChestGridLayout(this.config.FridgeColumns, this.config.FridgeRows);
@@ -844,11 +828,6 @@ public sealed class ModEntry : Mod
             layout = default;
             return false;
         }
-    }
-
-    private static bool IsBuiltInLocationFridge(Chest chest)
-    {
-        return chest.Location is not null && ReferenceEquals(chest.Location.GetFridge(false), chest);
     }
 
     private void ApplyLayoutIfNeededCore(ItemGrabMenu menu)
