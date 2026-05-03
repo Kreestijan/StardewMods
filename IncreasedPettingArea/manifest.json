@@ -1,0 +1,16 @@
+{
+  "Name": "Increased Petting Area",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Pets all animals within a configurable radius when you pet one, so you don't have to click each one individually.",
+  "UniqueID": "Kree.IncreasedPettingArea",
+  "EntryDll": "IncreasedPettingArea.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": ["Nexus:YOUR_MOD_ID"],
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
+}
