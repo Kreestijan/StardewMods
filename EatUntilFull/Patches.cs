@@ -35,9 +35,9 @@ internal static class Patches
     /// </summary>
     [HarmonyPrefix]
     [HarmonyPatch(typeof(GameLocation), nameof(GameLocation.createQuestionDialogue), typeof(string), typeof(Response[]), typeof(string))]
-    private static void CreateQuestionDialogue_Prefix(string question, ref Response[] answerChoices, string dialogueKey)
+    private static void CreateQuestionDialogue_Prefix(string question, ref Response[] answerChoices, string dialogKey)
     {
-        if (!ModEntry.Instance.Config.EnableMod || dialogueKey != "Eat")
+        if (!ModEntry.Instance.Config.EnableMod || dialogKey != "Eat")
             return;
 
         if (_pendingFood is null)
