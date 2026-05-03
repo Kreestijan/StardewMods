@@ -57,7 +57,7 @@ internal static class Patches
             return;
         }
 
-        if (ModEntry.TryGetAutoGrabberLayout(__instance, out ChestGridLayout autoGrabberLayout))
+        if (!ModEntry.IsUnlimitedStorageLoaded() && ModEntry.TryGetAutoGrabberLayout(__instance, out ChestGridLayout autoGrabberLayout))
         {
             __result = autoGrabberLayout.Capacity;
             return;
