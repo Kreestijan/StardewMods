@@ -1,0 +1,4 @@
+{
+  "gmcm.enable-mod.name": "Enable mod",
+  "gmcm.enable-mod.tooltip": "If enabled, farm animals are passable and the farmer can walk through them."
+}

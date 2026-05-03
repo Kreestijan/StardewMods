@@ -12,6 +12,9 @@ public sealed class ModEntry : Mod
     internal static ModEntry Instance { get; private set; } = null!;
 
     internal ModConfig config = new();
+
+    internal string Translate(string key) =>
+        this.Helper.Translation.Get(key);
     private Harmony? harmony;
 
     public override void Entry(IModHelper helper)
@@ -44,8 +47,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.EnableMod,
             setValue: value => this.config.EnableMod = value,
-            name: () => "Enable mod",
-            tooltip: () => "If enabled, farm animals are passable and the farmer can walk through them."
+            name: () => this.Translate("gmcm.enable-mod.name"),
+            tooltip: () => this.Translate("gmcm.enable-mod.tooltip")
         );
     }
 }
