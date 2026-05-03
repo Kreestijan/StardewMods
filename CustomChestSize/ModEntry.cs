@@ -81,6 +81,21 @@ public sealed class ModEntry : Mod
         Instance.LogDebug(message);
     }
 
+    private string Translate(string key)
+    {
+        return this.Helper.Translation.Get(key).ToString();
+    }
+
+    private string Translate(string key, object tokens)
+    {
+        return this.Helper.Translation.Get(key, tokens).ToString();
+    }
+
+    private Func<string> TranslateGetter(string key)
+    {
+        return () => this.Translate(key);
+    }
+
     private static readonly object ConfigLock = new();
 
     internal static ModEntry Instance { get; private set; } = null!;
@@ -106,7 +121,7 @@ public sealed class ModEntry : Mod
 
         helper.ConsoleCommands.Add(
             "ccs_reload",
-            "Reload Custom Chest Size config.json without restarting the game.",
+            this.Translate("commands.reload.description"),
             this.ReloadConfigCommand
         );
 
@@ -306,7 +321,7 @@ public sealed class ModEntry : Mod
     private void ReloadConfigCommand(string command, string[] args)
     {
         this.LoadConfig();
-        this.Monitor.Log("Reloaded config.json.", LogLevel.Info);
+        this.Monitor.Log(this.Translate("commands.reload.success"), LogLevel.Info);
         this.RefreshActiveChestMenu();
     }
 
@@ -369,15 +384,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Regular chest",
-            tooltip: () => "Configure vanilla regular chest size."
+            text: this.TranslateGetter("gmcm.regularChest.title"),
+            tooltip: this.TranslateGetter("gmcm.regularChest.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.RegularChestColumns,
             setValue: this.SetRegularChestColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in a regular chest.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.regularChest.columns.tooltip"),
             min: MinRegularChestColumns,
             max: MaxColumns,
             interval: 1
@@ -386,8 +401,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.RegularChestRows,
             setValue: this.SetRegularChestRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows a regular chest has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.regularChest.rows.tooltip"),
             min: MinRegularChestRows,
             max: MaxRows,
             interval: 1
@@ -395,15 +410,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Big chest",
-            tooltip: () => "Configure vanilla big chest size."
+            text: this.TranslateGetter("gmcm.bigChest.title"),
+            tooltip: this.TranslateGetter("gmcm.bigChest.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.BigChestColumns,
             setValue: this.SetBigChestColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in a big chest.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.bigChest.columns.tooltip"),
             min: MinBigChestColumns,
             max: MaxColumns,
             interval: 1
@@ -412,8 +427,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.BigChestRows,
             setValue: this.SetBigChestRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows a big chest has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.bigChest.rows.tooltip"),
             min: MinBigChestRows,
             max: MaxRows,
             interval: 1
@@ -421,15 +436,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Stone chest",
-            tooltip: () => "Configure stone chest size."
+            text: this.TranslateGetter("gmcm.stoneChest.title"),
+            tooltip: this.TranslateGetter("gmcm.stoneChest.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.StoneChestColumns,
             setValue: this.SetStoneChestColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in a stone chest.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.stoneChest.columns.tooltip"),
             min: MinStoneChestColumns,
             max: MaxColumns,
             interval: 1
@@ -438,8 +453,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.StoneChestRows,
             setValue: this.SetStoneChestRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows a stone chest has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.stoneChest.rows.tooltip"),
             min: MinStoneChestRows,
             max: MaxRows,
             interval: 1
@@ -447,15 +462,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Big stone chest",
-            tooltip: () => "Configure big stone chest size."
+            text: this.TranslateGetter("gmcm.bigStoneChest.title"),
+            tooltip: this.TranslateGetter("gmcm.bigStoneChest.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.BigStoneChestColumns,
             setValue: this.SetBigStoneChestColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in a big stone chest.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.bigStoneChest.columns.tooltip"),
             min: MinBigStoneChestColumns,
             max: MaxColumns,
             interval: 1
@@ -464,8 +479,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.BigStoneChestRows,
             setValue: this.SetBigStoneChestRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows a big stone chest has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.bigStoneChest.rows.tooltip"),
             min: MinBigStoneChestRows,
             max: MaxRows,
             interval: 1
@@ -473,15 +488,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Fridge",
-            tooltip: () => "Configure the farmhouse fridge size."
+            text: this.TranslateGetter("gmcm.fridge.title"),
+            tooltip: this.TranslateGetter("gmcm.fridge.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.FridgeColumns,
             setValue: this.SetFridgeColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in the farmhouse fridge.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.fridge.columns.tooltip"),
             min: MinFridgeColumns,
             max: MaxColumns,
             interval: 1
@@ -490,8 +505,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.FridgeRows,
             setValue: this.SetFridgeRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows the farmhouse fridge has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.fridge.rows.tooltip"),
             min: MinFridgeRows,
             max: MaxRows,
             interval: 1
@@ -499,15 +514,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Mini-fridge",
-            tooltip: () => "Configure placed mini-fridge size."
+            text: this.TranslateGetter("gmcm.miniFridge.title"),
+            tooltip: this.TranslateGetter("gmcm.miniFridge.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.MiniFridgeColumns,
             setValue: this.SetMiniFridgeColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in a mini-fridge.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.miniFridge.columns.tooltip"),
             min: MinMiniFridgeColumns,
             max: MaxColumns,
             interval: 1
@@ -516,8 +531,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.MiniFridgeRows,
             setValue: this.SetMiniFridgeRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows a mini-fridge has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.miniFridge.rows.tooltip"),
             min: MinMiniFridgeRows,
             max: MaxRows,
             interval: 1
@@ -525,15 +540,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Junimo chest",
-            tooltip: () => "Configure junimo chest size."
+            text: this.TranslateGetter("gmcm.junimoChest.title"),
+            tooltip: this.TranslateGetter("gmcm.junimoChest.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.JunimoChestColumns,
             setValue: this.SetJunimoChestColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in a junimo chest.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.junimoChest.columns.tooltip"),
             min: MinJunimoChestColumns,
             max: MaxColumns,
             interval: 1
@@ -542,8 +557,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.JunimoChestRows,
             setValue: this.SetJunimoChestRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows a junimo chest has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.junimoChest.rows.tooltip"),
             min: MinJunimoChestRows,
             max: MaxRows,
             interval: 1
@@ -551,15 +566,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Auto-Grabber",
-            tooltip: () => "Configure auto-grabber storage grid size."
+            text: this.TranslateGetter("gmcm.autoGrabber.title"),
+            tooltip: this.TranslateGetter("gmcm.autoGrabber.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.AutoGrabberColumns,
             setValue: this.SetAutoGrabberColumns,
-            name: () => "Columns",
-            tooltip: () => "How many slots each row has in an auto-grabber.",
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.autoGrabber.columns.tooltip"),
             min: MinAutoGrabberColumns,
             max: MaxColumns,
             interval: 1
@@ -568,8 +583,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.AutoGrabberRows,
             setValue: this.SetAutoGrabberRows,
-            name: () => "Rows",
-            tooltip: () => "How many rows an auto-grabber has.",
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.autoGrabber.rows.tooltip"),
             min: MinAutoGrabberRows,
             max: MaxRows,
             interval: 1
@@ -577,15 +592,15 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
-            text: () => "Layout tuning",
-            tooltip: () => "Use these offsets to tune menu backgrounds in-game. Slot positions stay unchanged unless noted."
+            text: this.TranslateGetter("gmcm.layoutTuning.title"),
+            tooltip: this.TranslateGetter("gmcm.layoutTuning.tooltip")
         );
         gmcm.AddNumberOption(
             this.ModManifest,
             getValue: () => this.config.ChestBackgroundHeightOffset,
             setValue: value => this.config.ChestBackgroundHeightOffset = value,
-            name: () => "Chest bg height",
-            tooltip: () => "Adds or removes height from the chest background only.",
+            name: this.TranslateGetter("gmcm.layoutTuning.chestBackgroundHeight.name"),
+            tooltip: this.TranslateGetter("gmcm.layoutTuning.chestBackgroundHeight.tooltip"),
             min: MinLayoutOffset,
             max: MaxLayoutOffset,
             interval: 4
@@ -594,8 +609,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.InventoryPanelGapOffset,
             setValue: value => this.config.InventoryPanelGapOffset = value,
-            name: () => "Inventory gap",
-            tooltip: () => "Moves the lower inventory panel background closer to or farther from the chest.",
+            name: this.TranslateGetter("gmcm.layoutTuning.inventoryGap.name"),
+            tooltip: this.TranslateGetter("gmcm.layoutTuning.inventoryGap.tooltip"),
             min: MinLayoutOffset,
             max: MaxLayoutOffset,
             interval: 4
@@ -604,8 +619,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.InventoryBackgroundTopOffset,
             setValue: value => this.config.InventoryBackgroundTopOffset = value,
-            name: () => "Inventory bg top",
-            tooltip: () => "Extends the lower background upward from the inventory slots.",
+            name: this.TranslateGetter("gmcm.layoutTuning.inventoryBackgroundTop.name"),
+            tooltip: this.TranslateGetter("gmcm.layoutTuning.inventoryBackgroundTop.tooltip"),
             min: MinLayoutOffset,
             max: MaxLayoutOffset,
             interval: 4
@@ -614,8 +629,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.InventoryBackgroundBottomOffset,
             setValue: value => this.config.InventoryBackgroundBottomOffset = value,
-            name: () => "Inventory bg bottom",
-            tooltip: () => "Extends the lower background downward from the inventory slots.",
+            name: this.TranslateGetter("gmcm.layoutTuning.inventoryBackgroundBottom.name"),
+            tooltip: this.TranslateGetter("gmcm.layoutTuning.inventoryBackgroundBottom.tooltip"),
             min: MinLayoutOffset,
             max: MaxLayoutOffset,
             interval: 4
@@ -624,8 +639,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.ColorPickerXOffset,
             setValue: value => this.config.ColorPickerXOffset = value,
-            name: () => "Color picker X",
-            tooltip: () => "Moves the opened chest color picker left or right relative to the resized chest.",
+            name: this.TranslateGetter("gmcm.layoutTuning.colorPickerX.name"),
+            tooltip: this.TranslateGetter("gmcm.layoutTuning.colorPickerX.tooltip"),
             min: MinColorPickerOffset,
             max: MaxColorPickerOffset,
             interval: 4
@@ -634,8 +649,8 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.config.ColorPickerYOffset,
             setValue: value => this.config.ColorPickerYOffset = value,
-            name: () => "Color picker Y",
-            tooltip: () => "Moves the opened chest color picker up or down relative to the resized chest.",
+            name: this.TranslateGetter("gmcm.layoutTuning.colorPickerY.name"),
+            tooltip: this.TranslateGetter("gmcm.layoutTuning.colorPickerY.tooltip"),
             min: MinColorPickerOffset,
             max: MaxColorPickerOffset,
             interval: 4
@@ -643,64 +658,64 @@ public sealed class ModEntry : Mod
         bool hasAnyCompat = hasChestsAnywhere || hasUnlimitedStorage || hasConvenientChests || hasCategorizeChests || hasRemoteFridgeStorage;
 
         if (hasAnyCompat)
-            gmcm.AddPageLink(this.ModManifest, "compatibility", () => "Compatibility", () => "Configure compatibility offsets for other mods.");
-        gmcm.AddPageLink(this.ModManifest, "extra-features", () => "Extra Features", () => "Additional features like chest UI tinting.");
-        gmcm.AddPageLink(this.ModManifest, "debug", () => "Debug", () => "Debug logging options.");
+            gmcm.AddPageLink(this.ModManifest, "compatibility", this.TranslateGetter("gmcm.compatibility.page"), this.TranslateGetter("gmcm.compatibility.page.tooltip"));
+        gmcm.AddPageLink(this.ModManifest, "extra-features", this.TranslateGetter("gmcm.extraFeatures.page"), this.TranslateGetter("gmcm.extraFeatures.page.tooltip"));
+        gmcm.AddPageLink(this.ModManifest, "debug", this.TranslateGetter("gmcm.debug.page"), this.TranslateGetter("gmcm.debug.page.tooltip"));
 
         if (hasAnyCompat)
         {
-            gmcm.AddPage(this.ModManifest, "compatibility", () => "Compatibility");
+            gmcm.AddPage(this.ModManifest, "compatibility", this.TranslateGetter("gmcm.compatibility.page"));
 
             if (hasChestsAnywhere)
             {
-                gmcm.AddSectionTitle(this.ModManifest, text: () => "Chests Anywhere", tooltip: () => "These offsets move Chests Anywhere's chest overlay widgets when that mod is installed.");
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ChestsAnywhereWidgetXOffset, setValue: value => this.config.ChestsAnywhereWidgetXOffset = value, name: () => "CA widget X", tooltip: () => "Moves the Chests Anywhere overlay widgets left or right.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ChestsAnywhereWidgetYOffset, setValue: value => this.config.ChestsAnywhereWidgetYOffset = value, name: () => "CA widget Y", tooltip: () => "Moves the Chests Anywhere overlay widgets up or down.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddSectionTitle(this.ModManifest, text: this.TranslateGetter("gmcm.compatibility.chestsAnywhere.title"), tooltip: this.TranslateGetter("gmcm.compatibility.chestsAnywhere.tooltip"));
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ChestsAnywhereWidgetXOffset, setValue: value => this.config.ChestsAnywhereWidgetXOffset = value, name: this.TranslateGetter("gmcm.compatibility.chestsAnywhere.x.name"), tooltip: this.TranslateGetter("gmcm.compatibility.chestsAnywhere.x.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ChestsAnywhereWidgetYOffset, setValue: value => this.config.ChestsAnywhereWidgetYOffset = value, name: this.TranslateGetter("gmcm.compatibility.chestsAnywhere.y.name"), tooltip: this.TranslateGetter("gmcm.compatibility.chestsAnywhere.y.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
             }
 
             if (hasUnlimitedStorage)
             {
-                gmcm.AddSectionTitle(this.ModManifest, text: () => "Unlimited Storage", tooltip: () => "These offsets move Unlimited Storage's search field when that mod is installed.");
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchXOffset, setValue: value => this.config.UnlimitedStorageSearchXOffset = value, name: () => "Search X", tooltip: () => "Moves Unlimited Storage's search field left or right.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchYOffset, setValue: value => this.config.UnlimitedStorageSearchYOffset = value, name: () => "Search Y", tooltip: () => "Moves Unlimited Storage's search field up or down.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchLeftOffset, setValue: value => this.config.UnlimitedStorageSearchLeftOffset = value, name: () => "Search left", tooltip: () => "Extends or shrinks the left side of Unlimited Storage's search field.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchRightOffset, setValue: value => this.config.UnlimitedStorageSearchRightOffset = value, name: () => "Search right", tooltip: () => "Extends or shrinks the right side of Unlimited Storage's search field.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddSectionTitle(this.ModManifest, text: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.title"), tooltip: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.tooltip"));
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchXOffset, setValue: value => this.config.UnlimitedStorageSearchXOffset = value, name: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchX.name"), tooltip: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchX.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchYOffset, setValue: value => this.config.UnlimitedStorageSearchYOffset = value, name: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchY.name"), tooltip: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchY.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchLeftOffset, setValue: value => this.config.UnlimitedStorageSearchLeftOffset = value, name: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchLeft.name"), tooltip: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchLeft.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.UnlimitedStorageSearchRightOffset, setValue: value => this.config.UnlimitedStorageSearchRightOffset = value, name: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchRight.name"), tooltip: this.TranslateGetter("gmcm.compatibility.unlimitedStorage.searchRight.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
             }
 
             if (hasConvenientChests)
             {
-                gmcm.AddSectionTitle(this.ModManifest, text: () => "Convenient Chests", tooltip: () => "These offsets move Convenient Chests' Categorize and Stash buttons when that mod is installed.");
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ConvenientChestsXOffset, setValue: value => this.config.ConvenientChestsXOffset = value, name: () => "X offset", tooltip: () => "Moves Convenient Chests' button row left or right.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ConvenientChestsYOffset, setValue: value => this.config.ConvenientChestsYOffset = value, name: () => "Y offset", tooltip: () => "Moves Convenient Chests' button row and category popup up or down.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+                gmcm.AddSectionTitle(this.ModManifest, text: this.TranslateGetter("gmcm.compatibility.convenientChests.title"), tooltip: this.TranslateGetter("gmcm.compatibility.convenientChests.tooltip"));
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ConvenientChestsXOffset, setValue: value => this.config.ConvenientChestsXOffset = value, name: this.TranslateGetter("gmcm.xOffset.name"), tooltip: this.TranslateGetter("gmcm.compatibility.convenientChests.x.tooltip"), min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.ConvenientChestsYOffset, setValue: value => this.config.ConvenientChestsYOffset = value, name: this.TranslateGetter("gmcm.yOffset.name"), tooltip: this.TranslateGetter("gmcm.compatibility.convenientChests.y.tooltip"), min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
             }
 
             if (hasCategorizeChests)
             {
-                gmcm.AddSectionTitle(this.ModManifest, text: () => "Categorize Chests", tooltip: () => "These offsets move Categorize Chests' Categorize and Stash buttons when that mod is installed.");
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.CategorizeChestsXOffset, setValue: value => this.config.CategorizeChestsXOffset = value, name: () => "X offset", tooltip: () => "Moves Categorize Chests' button row left or right.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.CategorizeChestsYOffset, setValue: value => this.config.CategorizeChestsYOffset = value, name: () => "Y offset", tooltip: () => "Moves Categorize Chests' button row and category popup up or down.", min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+                gmcm.AddSectionTitle(this.ModManifest, text: this.TranslateGetter("gmcm.compatibility.categorizeChests.title"), tooltip: this.TranslateGetter("gmcm.compatibility.categorizeChests.tooltip"));
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.CategorizeChestsXOffset, setValue: value => this.config.CategorizeChestsXOffset = value, name: this.TranslateGetter("gmcm.xOffset.name"), tooltip: this.TranslateGetter("gmcm.compatibility.categorizeChests.x.tooltip"), min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.CategorizeChestsYOffset, setValue: value => this.config.CategorizeChestsYOffset = value, name: this.TranslateGetter("gmcm.yOffset.name"), tooltip: this.TranslateGetter("gmcm.compatibility.categorizeChests.y.tooltip"), min: MinConvenientChestsOffset, max: MaxConvenientChestsOffset, interval: 8);
             }
 
             if (hasRemoteFridgeStorage)
             {
-                gmcm.AddSectionTitle(this.ModManifest, text: () => "Remote Fridge Storage", tooltip: () => "These offsets move Remote Fridge Storage's fridge icon when that mod is installed.");
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.RemoteFridgeStorageXOffset, setValue: value => this.config.RemoteFridgeStorageXOffset = value, name: () => "X offset", tooltip: () => "Moves the Remote Fridge Storage icon left or right.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
-                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.RemoteFridgeStorageYOffset, setValue: value => this.config.RemoteFridgeStorageYOffset = value, name: () => "Y offset", tooltip: () => "Moves the Remote Fridge Storage icon up or down.", min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddSectionTitle(this.ModManifest, text: this.TranslateGetter("gmcm.compatibility.remoteFridgeStorage.title"), tooltip: this.TranslateGetter("gmcm.compatibility.remoteFridgeStorage.tooltip"));
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.RemoteFridgeStorageXOffset, setValue: value => this.config.RemoteFridgeStorageXOffset = value, name: this.TranslateGetter("gmcm.xOffset.name"), tooltip: this.TranslateGetter("gmcm.compatibility.remoteFridgeStorage.x.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
+                gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.RemoteFridgeStorageYOffset, setValue: value => this.config.RemoteFridgeStorageYOffset = value, name: this.TranslateGetter("gmcm.yOffset.name"), tooltip: this.TranslateGetter("gmcm.compatibility.remoteFridgeStorage.y.tooltip"), min: MinLayoutOffset, max: MaxLayoutOffset, interval: 4);
             }
         }
 
-        gmcm.AddPage(this.ModManifest, "extra-features", () => "Extra Features");
-        gmcm.AddSectionTitle(this.ModManifest, text: () => "Chest UI tint", tooltip: () => "Tint the chest menu background to match the chest's color.");
-        gmcm.AddBoolOption(this.ModManifest, getValue: () => this.config.TintChestUI, setValue: value => this.config.TintChestUI = value, name: () => "Also apply Chest Tint to UI", tooltip: () => "When enabled and a chest has a color from the color picker, the chest menu background will be tinted to match.");
-        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIOpacity, setValue: value => this.config.TintChestUIOpacity = value, name: () => "UI Tint Opacity %", tooltip: () => "How strong the tint is. 0 = invisible, 100 = fully opaque.", min: 0, max: 100, interval: 1);
-        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingLeft, setValue: value => this.config.TintChestUIPaddingLeft = value, name: () => "Tint padding left", tooltip: () => "Extend the tint overlay leftward.", min: -200, max: 200, interval: 1);
-        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingRight, setValue: value => this.config.TintChestUIPaddingRight = value, name: () => "Tint padding right", tooltip: () => "Extend the tint overlay rightward.", min: -200, max: 200, interval: 1);
-        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingTop, setValue: value => this.config.TintChestUIPaddingTop = value, name: () => "Tint padding top", tooltip: () => "Extend the tint overlay upward.", min: -200, max: 200, interval: 1);
-        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingBottom, setValue: value => this.config.TintChestUIPaddingBottom = value, name: () => "Tint padding bottom", tooltip: () => "Extend the tint overlay downward.", min: -200, max: 200, interval: 1);
+        gmcm.AddPage(this.ModManifest, "extra-features", this.TranslateGetter("gmcm.extraFeatures.page"));
+        gmcm.AddSectionTitle(this.ModManifest, text: this.TranslateGetter("gmcm.extraFeatures.chestUITint.title"), tooltip: this.TranslateGetter("gmcm.extraFeatures.chestUITint.tooltip"));
+        gmcm.AddBoolOption(this.ModManifest, getValue: () => this.config.TintChestUI, setValue: value => this.config.TintChestUI = value, name: this.TranslateGetter("gmcm.extraFeatures.tintChestUI.name"), tooltip: this.TranslateGetter("gmcm.extraFeatures.tintChestUI.tooltip"));
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIOpacity, setValue: value => this.config.TintChestUIOpacity = value, name: this.TranslateGetter("gmcm.extraFeatures.tintOpacity.name"), tooltip: this.TranslateGetter("gmcm.extraFeatures.tintOpacity.tooltip"), min: 0, max: 100, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingLeft, setValue: value => this.config.TintChestUIPaddingLeft = value, name: this.TranslateGetter("gmcm.extraFeatures.tintPaddingLeft.name"), tooltip: this.TranslateGetter("gmcm.extraFeatures.tintPaddingLeft.tooltip"), min: -200, max: 200, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingRight, setValue: value => this.config.TintChestUIPaddingRight = value, name: this.TranslateGetter("gmcm.extraFeatures.tintPaddingRight.name"), tooltip: this.TranslateGetter("gmcm.extraFeatures.tintPaddingRight.tooltip"), min: -200, max: 200, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingTop, setValue: value => this.config.TintChestUIPaddingTop = value, name: this.TranslateGetter("gmcm.extraFeatures.tintPaddingTop.name"), tooltip: this.TranslateGetter("gmcm.extraFeatures.tintPaddingTop.tooltip"), min: -200, max: 200, interval: 1);
+        gmcm.AddNumberOption(this.ModManifest, getValue: () => this.config.TintChestUIPaddingBottom, setValue: value => this.config.TintChestUIPaddingBottom = value, name: this.TranslateGetter("gmcm.extraFeatures.tintPaddingBottom.name"), tooltip: this.TranslateGetter("gmcm.extraFeatures.tintPaddingBottom.tooltip"), min: -200, max: 200, interval: 1);
 
-        gmcm.AddPage(this.ModManifest, "debug", () => "Debug");
-        gmcm.AddSectionTitle(this.ModManifest, text: () => "Debug", tooltip: () => "Enable debug logging to diagnose issues.");
-        gmcm.AddBoolOption(this.ModManifest, getValue: () => this.config.DebugLogEnabled, setValue: value => this.config.DebugLogEnabled = value, name: () => "Debug logging", tooltip: () => "When enabled, logs detailed chest layout info to the SMAPI console.");
+        gmcm.AddPage(this.ModManifest, "debug", this.TranslateGetter("gmcm.debug.page"));
+        gmcm.AddSectionTitle(this.ModManifest, text: this.TranslateGetter("gmcm.debug.title"), tooltip: this.TranslateGetter("gmcm.debug.tooltip"));
+        gmcm.AddBoolOption(this.ModManifest, getValue: () => this.config.DebugLogEnabled, setValue: value => this.config.DebugLogEnabled = value, name: this.TranslateGetter("gmcm.debug.logging.name"), tooltip: this.TranslateGetter("gmcm.debug.logging.tooltip"));
 
         gmcm.OnFieldChanged(
             this.ModManifest,
@@ -1670,7 +1685,7 @@ public sealed class ModEntry : Mod
         int clamped = System.Math.Clamp(value, min, max);
         if (clamped != value)
         {
-            this.Monitor.Log($"{fieldName} was set to {value}, so it was clamped to {clamped}.", LogLevel.Warn);
+            this.Monitor.Log(this.Translate("config.clamped", new { fieldName, value, clamped }), LogLevel.Warn);
         }
 
         return clamped;
