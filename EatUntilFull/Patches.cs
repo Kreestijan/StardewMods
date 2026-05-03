@@ -1,5 +1,4 @@
 using HarmonyLib;
-using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Menus;
 using Object = StardewValley.Object;
@@ -9,67 +8,51 @@ namespace EatUntilFull;
 [HarmonyPatch]
 internal static class Patches
 {
+    private static Object? _pendingFood;
+
     /// <summary>
-    /// Replaces the Yes/No eat confirmation with a 3-option dialogue
-    /// ("Eat until full", "Yes", "No") so the player can choose to eat
-    /// multiple items at once.
+    /// Intercept food interaction from the active slot or world.
+    /// Replace Yes/No with a 3-option dialogue (EatUntilFull / Yes / No).
     /// </summary>
     [HarmonyPrefix]
     [HarmonyPatch(typeof(Object), nameof(Object.checkForAction))]
     private static bool Object_checkForAction_Prefix(Object __instance, Farmer who, bool justCheckingForActivity)
     {
-        if (!ModEntry.Instance.Config.EnableMod)
+        if (!ModEntry.Instance.Config.EnableMod || justCheckingForActivity)
             return true;
 
-        // Only intercept food items that the player can eat
-        if (__instance.Edibility <= 0 || who?.canEat() != true || who.isRidingHorse())
+        if (__instance.Edibility <= 0 || __instance.Stack < 2)
             return true;
 
-        if (justCheckingForActivity)
-            return true;
-
-        who.lastClickableObject = __instance;
-
-        string question;
-        try
-        {
-            question = Game1.content.LoadString("Strings\\StringsFromCSFiles:Object.cs.12962", __instance.DisplayName);
-        }
-        catch
-        {
-            question = $"Eat {__instance.DisplayName}?";
-        }
-
-        string yesText;
-        string noText;
-        try
-        {
-            yesText = Game1.content.LoadString("Strings\\Lexicon:QuestionYes");
-            noText = Game1.content.LoadString("Strings\\Lexicon:QuestionNo");
-        }
-        catch
-        {
-            yesText = "Yes";
-            noText = "No";
-        }
-
-        who.currentLocation?.createQuestionDialogue(
-            question,
-            new Response[]
-            {
-                new("EatUntilFull", ModEntry.Instance.Translate("dialogue.eat-until-full")),
-                new("Yes", yesText),
-                new("No", noText)
-            },
-            "Eat"
-        );
-
+        _pendingFood = __instance;
+        ShowEatDialogue(who, __instance);
         return false;
     }
 
     /// <summary>
-    /// Handles the "Eat until full" response by eating enough of the
-    /// selected food item to fill the player's energy or health bar.
+    /// Adds "Eat until full" to any &quot;Eat&quot;-keyed question dialogue.
+    /// Covers food eaten from the inventory menu.
+    /// </summary>
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(GameLocation), nameof(GameLocation.createQuestionDialogue), typeof(string), typeof(Response[]), typeof(string))]
+    private static void CreateQuestionDialogue_Prefix(string question, ref Response[] answerChoices, string dialogueKey)
+    {
+        if (!ModEntry.Instance.Config.EnableMod || dialogueKey != "Eat")
+            return;
+
+        if (_pendingFood is null)
+            _pendingFood = DetectFoodFromGameState();
+
+        if (_pendingFood is null || _pendingFood.Edibility <= 0 || _pendingFood.Stack < 2)
+            return;
+
+        var list = answerChoices.ToList();
+        list.Insert(list.Count - 1, new Response("EatUntilFull", ModEntry.Instance.Translate("dialogue.eat-until-full")));
+        answerChoices = list.ToArray();
+    }
+
+    /// <summary>
+    /// Handle the &quot;EatUntilFull&quot; response.
     /// </summary>
     [HarmonyPrefix]
     [HarmonyPatch(typeof(GameLocation), nameof(GameLocation.answerDialogue))]
@@ -78,116 +61,121 @@ internal static class Patches
         if (response.responseKey != "EatUntilFull")
             return true;
 
-        GameLocation? location = Game1.currentLocation;
-        if (location is null || location.currentQuestionKeys.Count <= 0)
-            return true;
-
-        // Peek to verify this is an "Eat" dialogue, but only pop when we handle it
-        if (location.currentQuestionKeys.Peek() != "Eat")
-            return true;
-
-        ModConfig config = ModEntry.Instance.Config;
-        if (!config.EnableMod)
-            return false;
-
-        // Pop the question key — we're handling this response
-        location.currentQuestionKeys.Pop();
-
-        if (Game1.player.lastClickableObject is not Object food || food.Edibility <= 0)
-            return false;
-
-        // Guard: item gives neither energy nor health
-        bool givesStamina = food.staminaRecovered > 0;
-        bool givesHealth = food.healthRecovered > 0;
-
-        if (!givesStamina && !givesHealth)
-        {
-            ShowTransientMessage(ModEntry.Instance.Translate("message.no-benefit"));
-            return false;
-        }
-
-        // Only the stack that was right-clicked is eligible — don't pull from other slots
-        int available = food.Stack;
-
-        if (available <= 0)
-            return false;
-
-        // Calculate how many items to eat
-        bool fillStamina = config.FillTarget == FillTarget.Energy;
-        int needed;
-
-        if (fillStamina)
-        {
-            if (!givesStamina)
-            {
-                ShowTransientMessage(ModEntry.Instance.Translate("message.no-energy"));
-                return false;
-            }
-
-            float deficit = Game1.player.maxStamina - Game1.player.stamina;
-            needed = (int)Math.Ceiling(deficit / food.staminaRecovered);
-        }
-        else
-        {
-            if (!givesHealth)
-            {
-                ShowTransientMessage(ModEntry.Instance.Translate("message.no-health"));
-                return false;
-            }
-
-            int deficit = Game1.player.maxHealth - Game1.player.health;
-            needed = (int)Math.Ceiling((double)deficit / food.healthRecovered);
-        }
-
-        if (needed <= 0)
-        {
-            ShowTransientMessage(ModEntry.Instance.Translate("message.already-full"));
-            return false;
-        }
-
-        int toEat = Math.Min(needed, available);
-
-        // Apply cumulative stats
-        Game1.player.stamina = Math.Min(
-            Game1.player.maxStamina,
-            Game1.player.stamina + food.staminaRecovered * toEat
-        );
-        Game1.player.health = Math.Min(
-            Game1.player.maxHealth,
-            Game1.player.health + food.healthRecovered * toEat
-        );
-
-        // Remove consumed items from inventory
-        RemoveItemsFromInventory(food, toEat);
-
-        // Single eat animation and sound
-        Game1.player.ShowItemEatAnimation();
-        Game1.playSound("eat");
-
-        // Show summary message
-        string summary = string.Format(
-            ModEntry.Instance.Translate("message.eaten-count"),
-            toEat,
-            food.DisplayName
-        );
-        Game1.addHUDMessage(new HUDMessage(summary, HUDMessage.achievement_type));
-
+        HandleEatUntilFull();
         return false;
     }
 
-    private static void RemoveItemsFromInventory(Object food, int count)
+    private static Object? DetectFoodFromGameState()
     {
-        food.Stack -= count;
-        if (food.Stack <= 0)
+        // If the active item is edible, use it
+        if (Game1.player?.ActiveItem is Object obj && obj.Edibility > 0)
+            return obj;
+
+        // Check the inventory-page hovered item
+        if (Game1.activeClickableMenu is GameMenu menu && menu.currentTab == 0)
         {
-            Game1.player.removeItemFromInventory(food);
+            var invPage = menu.pages[0] as InventoryPage;
+            if (invPage?.hoveredItem is Object hovered && hovered.Edibility > 0)
+                return hovered;
         }
+
+        return null;
     }
 
-    /// <summary>
-    /// Shows a brief top-left HUD message instead of a blocking dialogue box,
-    /// so the player isn't interrupted mid-workflow.
-    /// </summary>
+    private static void ShowEatDialogue(Farmer who, Object food)
+    {
+        string question;
+        try { question = Game1.content.LoadString("Strings\\StringsFromCSFiles:Object.cs.12962", food.DisplayName); }
+        catch { question = $"Eat {food.DisplayName}?"; }
+
+        string yesText, noText;
+        try { yesText = Game1.content.LoadString("Strings\\Lexicon:QuestionYes"); }
+        catch { yesText = "Yes"; }
+        try { noText = Game1.content.LoadString("Strings\\Lexicon:QuestionNo"); }
+        catch { noText = "No"; }
+
+        who.currentLocation?.createQuestionDialogue(
+            question,
+            [
+                new("EatUntilFull", ModEntry.Instance.Translate("dialogue.eat-until-full")),
+                new("Yes", yesText),
+                new("No", noText)
+            ],
+            "Eat"
+        );
+    }
+
+    private static void HandleEatUntilFull()
+    {
+        if (_pendingFood is null || _pendingFood.Edibility <= 0)
+        {
+            ShowTransientMessage("Nothing to eat.");
+            return;
+        }
+
+        Object food = _pendingFood;
+        _pendingFood = null;
+
+        // SDV recovery formulas (mirrors Object.staminaRecovered / healthRecovered)
+        int staminaPerItem = Math.Max(1, (int)(food.Edibility * 2.5f + 30f));
+        int healthPerItem = Math.Max(1, staminaPerItem / 2);
+        int available = food.Stack;
+
+        if (available <= 0)
+            return;
+
+        var config = ModEntry.Instance.Config;
+        int needed;
+
+        if (config.FillTarget == FillTarget.Energy)
+        {
+            float deficit = Game1.player.maxStamina.Value - Game1.player.stamina;
+            if (deficit <= 0f)
+            {
+                ShowTransientMessage(ModEntry.Instance.Translate("message.already-full"));
+                return;
+            }
+            needed = (int)Math.Ceiling(deficit / staminaPerItem);
+        }
+        else
+        {
+            float deficit = Game1.player.maxHealth - Game1.player.health;
+            if (deficit <= 0f)
+            {
+                ShowTransientMessage(ModEntry.Instance.Translate("message.already-full"));
+                return;
+            }
+            needed = (int)Math.Ceiling(deficit / healthPerItem);
+        }
+
+        if (needed <= 0)
+            return;
+
+        int toEat = Math.Min(needed, available);
+
+        // Silently consume all but the last item (just stats, no animation)
+        for (int i = 1; i < toEat; i++)
+        {
+            Game1.player.stamina = Math.Min(
+                Game1.player.maxStamina.Value,
+                Game1.player.stamina + staminaPerItem
+            );
+            Game1.player.health = Math.Min(
+                Game1.player.maxHealth,
+                Game1.player.health + healthPerItem
+            );
+            food.Stack--;
+        }
+
+        // Eat the last one with full animation, sound, and inventory removal
+        Game1.player.eatObject(food);
+
+        Game1.addHUDMessage(new HUDMessage(
+            string.Format(ModEntry.Instance.Translate("message.eaten-count"), toEat, food.DisplayName),
+            HUDMessage.achievement_type
+        ));
+    }
+
     private static void ShowTransientMessage(string message)
     {
         Game1.addHUDMessage(new HUDMessage(message, HUDMessage.error_type));

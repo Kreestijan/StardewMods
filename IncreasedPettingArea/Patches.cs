@@ -1,4 +1,5 @@
 using HarmonyLib;
+using Microsoft.Xna.Framework;
 using StardewValley;
 
 namespace IncreasedPettingArea;
@@ -17,7 +18,7 @@ internal static class FarmAnimalPetPatch
         if (!ModEntry.Instance.Config.EnableMod || is_auto_pet || _isPettingNearby)
             return;
 
-        if (who is null || __instance.Location is not Farm farm)
+        if (who is null || who.currentLocation is not Farm farm)
             return;
 
         int radius = ModEntry.Instance.Config.PetRadius;

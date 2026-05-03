@@ -37,5 +37,16 @@ public interface IGenericModConfigMenuApi
 
     void AddPageLink(IManifest mod, string pageId, Func<string> text, Func<string>? tooltip = null);
 
+    void AddTextOption(
+        IManifest mod,
+        Func<string> getValue,
+        Action<string> setValue,
+        Func<string>? name = null,
+        Func<string>? tooltip = null,
+        string[]? allowedValues = null,
+        Func<string, string>? formatValue = null,
+        string? fieldId = null
+    );
+
     void OnFieldChanged(IManifest mod, Action<string, object> onChange);
 }

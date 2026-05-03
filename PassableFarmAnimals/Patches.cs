@@ -29,7 +29,7 @@ internal static class FarmAnimalCollisionPatch
         }
 
         var animals = farm.Animals;
-        if (animals.Count <= 0)
+        if (animals.Count() <= 0)
         {
             return;
         }
