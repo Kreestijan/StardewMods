@@ -1,0 +1,8 @@
+{
+  "dialogue.eat-until-full": "Eat until full",
+  "message.no-energy": "This item doesn't provide energy.",
+  "message.no-health": "This item doesn't provide health.",
+  "message.no-benefit": "This item doesn't provide any energy or health.",
+  "message.already-full": "Your stats are already full!",
+  "message.eaten-count": "{0} {1} eaten."
+}

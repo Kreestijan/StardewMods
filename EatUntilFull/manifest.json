@@ -1,0 +1,16 @@
+{
+  "Name": "Eat Until Full",
+  "Author": "Kree",
+  "Version": "1.0.0",
+  "Description": "Automatically continues eating food from your inventory until your health and energy are fully restored.",
+  "UniqueID": "Kree.EatUntilFull",
+  "EntryDll": "EatUntilFull.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": ["Nexus:YOUR_MOD_ID"],
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
+}
