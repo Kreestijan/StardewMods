@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
+using StardewValley.Buildings;
 using StardewValley.Locations;
 using StardewValley.Menus;
 using StardewValley.Objects;
@@ -43,6 +44,8 @@ public sealed class ModEntry : Mod
     private const int MinMiniFridgeRows = 3;
     private const int MinJunimoChestColumns = 3;
     private const int MinJunimoChestRows = 3;
+    private const int MinJunimoHutColumns = 12;
+    private const int MinJunimoHutRows = 3;
     private const int MinAutoGrabberColumns = 12;
     private const int MinAutoGrabberRows = 3;
     private const int MaxColumns = 24;
@@ -56,6 +59,8 @@ public sealed class ModEntry : Mod
     private static readonly ConditionalWeakTable<ItemGrabMenu, ChestMenuLayoutState> LayoutStates = new();
 
     private static readonly ConditionalWeakTable<Chest, StardewValley.Object?> AutoGrabberChests = new();
+
+    private static readonly ConditionalWeakTable<Chest, JunimoHut> JunimoHutChests = new();
 
     internal void LogDebug(string message)
     {
@@ -133,7 +138,14 @@ public sealed class ModEntry : Mod
 
     internal static bool TryGetConfiguredLayout(Chest chest, out ChestGridLayout layout)
     {
-        return Instance.TryGetConfiguredLayoutCore(chest, out layout);
+        if (TryGetStorageInfo(chest, out StorageInfo storage))
+        {
+            layout = storage.Layout;
+            return true;
+        }
+
+        layout = default;
+        return false;
     }
 
     internal static int GetConfiguredCapacity(Chest chest, int fallbackCapacity)
@@ -143,24 +155,36 @@ public sealed class ModEntry : Mod
             : fallbackCapacity;
     }
 
+    internal static bool TryGetStorageInfo(Chest chest, out StorageInfo storage)
+    {
+        return Instance.TryResolveStorage(chest, out storage);
+    }
+
+    internal static bool TryGetStorageInfo(ItemGrabMenu menu, out StorageInfo storage)
+    {
+        return Instance.TryResolveStorage(menu, out storage);
+    }
+
     internal static bool TryGetAutoGrabberLayout(Chest chest, out ChestGridLayout layout)
     {
-        if (!TryGetAutoGrabberOwner(chest, out _))
+        if (TryGetStorageInfo(chest, out StorageInfo storage) && storage.Kind == StorageKind.AutoGrabber)
         {
-            layout = default;
-            return false;
-        }
-
-        lock (ConfigLock)
-        {
-            layout = new ChestGridLayout(Instance.config.AutoGrabberColumns, Instance.config.AutoGrabberRows);
+            layout = storage.Layout;
             return true;
         }
+
+        layout = default;
+        return false;
     }
 
     internal static void ApplyLayoutIfNeeded(ItemGrabMenu menu)
     {
         Instance.ApplyLayoutIfNeededCore(menu);
+    }
+
+    internal static bool ShouldRefreshVisibleLayout(ItemGrabMenu menu)
+    {
+        return Instance.ShouldRefreshVisibleLayoutCore(menu);
     }
 
     internal static int GetChestsAnywhereWidgetXOffset()
@@ -338,6 +362,7 @@ public sealed class ModEntry : Mod
     private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e)
     {
         this.RegisterAutoGrabbersInLoadedLocations();
+        this.RegisterJunimoHutsInLoadedLocations();
     }
 
     private void OnLocationListChanged(object? sender, LocationListChangedEventArgs e)
@@ -345,6 +370,7 @@ public sealed class ModEntry : Mod
         foreach (GameLocation location in e.Added)
         {
             this.RegisterAutoGrabbersInLocation(location);
+            this.RegisterJunimoHutsInLocation(location);
         }
     }
 
@@ -566,6 +592,32 @@ public sealed class ModEntry : Mod
 
         gmcm.AddSectionTitle(
             this.ModManifest,
+            text: this.TranslateGetter("gmcm.junimoHut.title"),
+            tooltip: this.TranslateGetter("gmcm.junimoHut.tooltip")
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.JunimoHutColumns,
+            setValue: this.SetJunimoHutColumns,
+            name: this.TranslateGetter("gmcm.columns.name"),
+            tooltip: this.TranslateGetter("gmcm.junimoHut.columns.tooltip"),
+            min: MinJunimoHutColumns,
+            max: MaxColumns,
+            interval: 1
+        );
+        gmcm.AddNumberOption(
+            this.ModManifest,
+            getValue: () => this.config.JunimoHutRows,
+            setValue: this.SetJunimoHutRows,
+            name: this.TranslateGetter("gmcm.rows.name"),
+            tooltip: this.TranslateGetter("gmcm.junimoHut.rows.tooltip"),
+            min: MinJunimoHutRows,
+            max: MaxRows,
+            interval: 1
+        );
+
+        gmcm.AddSectionTitle(
+            this.ModManifest,
             text: this.TranslateGetter("gmcm.autoGrabber.title"),
             tooltip: this.TranslateGetter("gmcm.autoGrabber.tooltip")
         );
@@ -763,127 +815,174 @@ public sealed class ModEntry : Mod
 
     private bool TryGetConfiguredLayoutCore(Chest chest, out ChestGridLayout layout)
     {
-        lock (ConfigLock)
+        if (this.TryResolveStorage(chest, out StorageInfo storage))
         {
-            this.LogDebug($"[TryGetConfiguredLayoutCore] chest ItemId={chest.ItemId} Name={chest.Name} SpecialChestType={chest.SpecialChestType} playerChest={chest.playerChest.Value}");
+            layout = storage.Layout;
+            return true;
+        }
 
-            if (TryGetAutoGrabberLayout(chest, out layout))
-            {
-                this.LogDebug($"[TryGetConfiguredLayoutCore] Selected AUTO-GRABBER layout: {layout.Columns}x{layout.Rows}");
-                return true;
-            }
+        layout = default;
+        return false;
+    }
 
-            if (chest.fridge.Value)
-            {
-                if (IsBuiltInLocationFridge(chest))
-                {
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected FRIDGE layout: {this.config.FridgeColumns}x{this.config.FridgeRows}");
-                    layout = new ChestGridLayout(this.config.FridgeColumns, this.config.FridgeRows);
-                }
-                else
-                {
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected MINI-FRIDGE layout: {this.config.MiniFridgeColumns}x{this.config.MiniFridgeRows}");
-                    layout = new ChestGridLayout(this.config.MiniFridgeColumns, this.config.MiniFridgeRows);
-                }
+    private bool TryResolveStorage(ItemGrabMenu menu, out StorageInfo storage)
+    {
+        if (TryResolveAutoGrabberMenu(menu, out Chest autoGrabberChest, out StardewValley.Object autoGrabber))
+        {
+            storage = this.CreateStorageInfo(StorageKind.AutoGrabber, autoGrabberChest, autoGrabber);
+            this.LogStorageSelection(storage, "[TryResolveStorage(menu)]");
+            return true;
+        }
 
-                return true;
-            }
+        if (menu.context is JunimoHut hut)
+        {
+            Chest outputChest = hut.GetOutputChest();
+            RegisterJunimoHutOutputChest(hut);
+            storage = this.CreateStorageInfo(StorageKind.JunimoHut, outputChest, hut);
+            this.LogStorageSelection(storage, "[TryResolveStorage(menu)]");
+            return true;
+        }
 
+        if (menu.source == ItemGrabMenu.source_chest && menu.sourceItem is Chest sourceChest)
+        {
+            return this.TryResolveStorage(sourceChest, out storage);
+        }
+
+        storage = default;
+        return false;
+    }
+
+    private bool TryResolveStorage(Chest chest, out StorageInfo storage)
+    {
+        if (this.ShouldLogDebug())
+        {
+            this.LogDebug($"[TryResolveStorage(chest)] chest ItemId={chest.ItemId} QualifiedItemId={chest.QualifiedItemId} Name={chest.Name} SpecialChestType={chest.SpecialChestType} playerChest={chest.playerChest.Value} fridge={chest.fridge.Value} Location={chest.Location?.NameOrUniqueName ?? "null"}");
+        }
+
+        if (TryGetAutoGrabberOwner(chest, out StardewValley.Object autoGrabber))
+        {
+            storage = this.CreateStorageInfo(StorageKind.AutoGrabber, chest, autoGrabber);
+            this.LogStorageSelection(storage, "[TryResolveStorage(chest)]");
+            return true;
+        }
+
+        if (Game1.activeClickableMenu is ItemGrabMenu menu
+            && menu.context is JunimoHut activeHut
+            && ReferenceEquals(activeHut.GetOutputChest(), chest))
+        {
+            RegisterJunimoHutOutputChest(activeHut);
+        }
+
+        if (TryGetJunimoHutOwner(chest, out JunimoHut junimoHut))
+        {
+            storage = this.CreateStorageInfo(StorageKind.JunimoHut, chest, junimoHut);
+            this.LogStorageSelection(storage, "[TryResolveStorage(chest)]");
+            return true;
+        }
+
+        StorageKind? storageKind = null;
+        bool isBuiltInLocationFridge = IsBuiltInFridge(chest);
+        if (isBuiltInLocationFridge)
+        {
+            storageKind = StorageKind.Fridge;
+        }
+        else if (chest.fridge.Value)
+        {
+            storageKind = StorageKind.MiniFridge;
+        }
+        else
+        {
             // Note: ItemId is used to distinguish chest types because some mods may set
             // SpecialChestType to BigChest on all player chests.
-            switch (chest.ItemId)
+            storageKind = chest.ItemId switch
             {
-                case "BigChest":
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected BIG layout: {this.config.BigChestColumns}x{this.config.BigChestRows}");
-                    layout = new ChestGridLayout(this.config.BigChestColumns, this.config.BigChestRows);
-                    return true;
+                "BigChest" => StorageKind.BigChest,
+                "BigStoneChest" => StorageKind.BigStoneChest,
+                "130" => StorageKind.RegularChest,
+                "232" => StorageKind.StoneChest,
+                "216" => StorageKind.MiniFridge,
+                "256" => StorageKind.JunimoChest,
+                _ => null
+            };
+        }
 
-                case "BigStoneChest":
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected BIG STONE layout: {this.config.BigStoneChestColumns}x{this.config.BigStoneChestRows}");
-                    layout = new ChestGridLayout(this.config.BigStoneChestColumns, this.config.BigStoneChestRows);
-                    return true;
+        if (storageKind is null && chest.playerChest.Value)
+        {
+            storageKind = StorageKind.ModdedPlayerChest;
+        }
 
-                case "130":
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected REGULAR layout: {this.config.RegularChestColumns}x{this.config.RegularChestRows}");
-                    layout = new ChestGridLayout(this.config.RegularChestColumns, this.config.RegularChestRows);
-                    return true;
-
-                case "232":
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected STONE layout: {this.config.StoneChestColumns}x{this.config.StoneChestRows}");
-                    layout = new ChestGridLayout(this.config.StoneChestColumns, this.config.StoneChestRows);
-                    return true;
-
-                case "216":
-                    if (IsBuiltInLocationFridge(chest))
-                    {
-                        this.LogDebug($"[TryGetConfiguredLayoutCore] Selected FRIDGE layout: {this.config.FridgeColumns}x{this.config.FridgeRows}");
-                        layout = new ChestGridLayout(this.config.FridgeColumns, this.config.FridgeRows);
-                    }
-                    else
-                    {
-                        this.LogDebug($"[TryGetConfiguredLayoutCore] Selected MINI-FRIDGE layout: {this.config.MiniFridgeColumns}x{this.config.MiniFridgeRows}");
-                        layout = new ChestGridLayout(this.config.MiniFridgeColumns, this.config.MiniFridgeRows);
-                    }
-                    return true;
-
-                case "256":
-                    this.LogDebug($"[TryGetConfiguredLayoutCore] Selected JUNIMO layout: {this.config.JunimoChestColumns}x{this.config.JunimoChestRows}");
-                    layout = new ChestGridLayout(this.config.JunimoChestColumns, this.config.JunimoChestRows);
-                    return true;
+        if (storageKind is null)
+        {
+            if (this.ShouldLogDebug())
+            {
+                this.LogDebug($"[TryResolveStorage(chest)] No matching layout. ItemId={chest.ItemId} QualifiedItemId={chest.QualifiedItemId} SpecialChestType={chest.SpecialChestType} playerChest={chest.playerChest.Value} fridge={chest.fridge.Value}");
             }
 
-            // Fallback for any other player chest (e.g. from mods)
-            if (chest.playerChest.Value)
-            {
-                this.LogDebug($"[TryGetConfiguredLayoutCore] Selected REGULAR layout (fallback): {this.config.RegularChestColumns}x{this.config.RegularChestRows}");
-                layout = new ChestGridLayout(this.config.RegularChestColumns, this.config.RegularChestRows);
-                return true;
-            }
-
-            this.LogDebug($"[TryGetConfiguredLayoutCore] No matching layout. playerChest={chest.playerChest.Value}");
-            layout = default;
+            storage = default;
             return false;
+        }
+
+        storage = this.CreateStorageInfo(storageKind.Value, chest);
+        this.LogStorageSelection(storage, "[TryResolveStorage(chest)]");
+        return true;
+    }
+
+    private StorageInfo CreateStorageInfo(StorageKind kind, Chest chest, object? owner = null)
+    {
+        lock (ConfigLock)
+        {
+            ChestGridLayout layout = kind switch
+            {
+                StorageKind.AutoGrabber => new ChestGridLayout(this.config.AutoGrabberColumns, this.config.AutoGrabberRows),
+                StorageKind.JunimoHut => new ChestGridLayout(this.config.JunimoHutColumns, this.config.JunimoHutRows),
+                StorageKind.Fridge => new ChestGridLayout(this.config.FridgeColumns, this.config.FridgeRows),
+                StorageKind.MiniFridge => new ChestGridLayout(this.config.MiniFridgeColumns, this.config.MiniFridgeRows),
+                StorageKind.BigChest => new ChestGridLayout(this.config.BigChestColumns, this.config.BigChestRows),
+                StorageKind.BigStoneChest => new ChestGridLayout(this.config.BigStoneChestColumns, this.config.BigStoneChestRows),
+                StorageKind.StoneChest => new ChestGridLayout(this.config.StoneChestColumns, this.config.StoneChestRows),
+                StorageKind.JunimoChest => new ChestGridLayout(this.config.JunimoChestColumns, this.config.JunimoChestRows),
+                StorageKind.RegularChest or StorageKind.ModdedPlayerChest => new ChestGridLayout(this.config.RegularChestColumns, this.config.RegularChestRows),
+                _ => new ChestGridLayout(this.config.RegularChestColumns, this.config.RegularChestRows)
+            };
+
+            return new StorageInfo(kind, chest, layout, owner);
         }
     }
 
-    private static bool IsBuiltInLocationFridge(Chest chest)
+    private void LogStorageSelection(StorageInfo storage, string source)
+    {
+        if (!this.ShouldLogDebug())
+        {
+            return;
+        }
+
+        this.LogDebug($"{source} Selected {storage.Kind} layout: {storage.Layout.Columns}x{storage.Layout.Rows}");
+    }
+
+    internal static bool IsBuiltInFridge(Chest chest)
     {
         return chest.Location is not null && ReferenceEquals(chest.Location.GetFridge(false), chest);
     }
 
     private void ApplyLayoutIfNeededCore(ItemGrabMenu menu)
     {
-        if (TryResolveAutoGrabberMenu(menu, out Chest autoGrabberChest, out StardewValley.Object autoGrabber))
-        {
-            this.ApplyAutoGrabberLayout(menu, autoGrabberChest, autoGrabber);
-            return;
-        }
-
-        if (menu.source != ItemGrabMenu.source_chest)
+        if (!this.TryResolveStorage(menu, out StorageInfo storage))
         {
             return;
         }
 
-        if (menu.sourceItem is not Chest chest)
+        if (storage.Kind == StorageKind.AutoGrabber && storage.Owner is StardewValley.Object autoGrabber)
         {
+            this.ApplyAutoGrabberLayout(menu, storage.Chest, autoGrabber);
             return;
         }
 
-        if (!this.TryGetConfiguredLayoutCore(chest, out ChestGridLayout configuredLayout))
-        {
-            return;
-        }
-
-        int visibleRows = configuredLayout.Rows;
-        int visibleCapacity = configuredLayout.Capacity;
+        Chest chest = storage.Chest;
+        ChestGridLayout configuredLayout = storage.Layout;
         int currentItemCount = chest.GetItemsForPlayer().Count(item => item is not null);
         bool unlimitedStorageLoaded = IsUnlimitedStorageLoaded();
-
-        if (!unlimitedStorageLoaded && currentItemCount > visibleCapacity)
-        {
-            visibleRows = (currentItemCount + configuredLayout.Columns - 1) / configuredLayout.Columns;
-            visibleCapacity = visibleRows * configuredLayout.Columns;
-        }
+        int visibleRows = this.GetAdaptiveVisibleRows(configuredLayout.Columns, configuredLayout.Rows, currentItemCount, canGrowBeyondConfiguredRows: !unlimitedStorageLoaded);
+        int visibleCapacity = visibleRows * configuredLayout.Columns;
 
         int extraRows = System.Math.Max(0, visibleRows - 3);
         int menuWidth = System.Math.Max(
@@ -948,7 +1047,10 @@ public sealed class ModEntry : Mod
         menu.RepositionSideButtons();
         menu.SetupBorderNeighbors();
         menu.populateClickableComponentList();
-        this.LogDebug($"[ApplyLayout] chest={menu.ItemsToGrabMenu.rows}x{menu.ItemsToGrabMenu.inventory.Count / menu.ItemsToGrabMenu.rows} slots={menu.ItemsToGrabMenu.inventory.Count} inv={menu.inventory.inventory.Count} total={menu.allClickableComponents?.Count ?? 0}");
+        if (this.ShouldLogDebug())
+        {
+            this.LogDebug($"[ApplyLayout] chest={menu.ItemsToGrabMenu.rows}x{menu.ItemsToGrabMenu.inventory.Count / menu.ItemsToGrabMenu.rows} slots={menu.ItemsToGrabMenu.inventory.Count} inv={menu.inventory.inventory.Count} total={menu.allClickableComponents?.Count ?? 0}");
+        }
 
         this.SetLayoutState(menu, new ChestMenuLayoutState(chestPanelTop, chestPanelTop)
         {
@@ -974,16 +1076,10 @@ public sealed class ModEntry : Mod
 
         IList<Item> items = internalChest.Items;
         int itemCount = items.Count(item => item is not null);
-        int visibleRows = rows;
-        int visibleCapacity = cols * rows;
+        int visibleRows = this.GetAdaptiveVisibleRows(cols, rows, itemCount, canGrowBeyondConfiguredRows: true);
+        int visibleCapacity = visibleRows * cols;
 
-        if (itemCount > visibleCapacity)
-        {
-            visibleRows = (itemCount + cols - 1) / cols;
-            visibleCapacity = visibleRows * cols;
-        }
-
-        EnsureInventoryCapacity(items, visibleCapacity);
+        EnsureInventoryCapacity(items, System.Math.Max(cols * rows, visibleCapacity));
 
         int menuWidth = System.Math.Max(
             DefaultMenuWidth,
@@ -1100,6 +1196,33 @@ public sealed class ModEntry : Mod
         }
     }
 
+    private bool ShouldRefreshVisibleLayoutCore(ItemGrabMenu menu)
+    {
+        if (menu.ItemsToGrabMenu is null)
+        {
+            return false;
+        }
+
+        if (!this.TryResolveStorage(menu, out StorageInfo storage))
+        {
+            return false;
+        }
+
+        if (menu.ItemsToGrabMenu.rows >= storage.Layout.Rows)
+        {
+            return false;
+        }
+
+        int visibleCapacity = menu.ItemsToGrabMenu.capacity;
+        if (visibleCapacity <= 0)
+        {
+            return false;
+        }
+
+        int currentItemCount = storage.Chest.GetItemsForPlayer().Count(item => item is not null);
+        return currentItemCount >= visibleCapacity;
+    }
+
     private void PrepareChestClickableComponents(ItemGrabMenu menu)
     {
         menu.ItemsToGrabMenu.populateClickableComponentList();
@@ -1166,7 +1289,10 @@ public sealed class ModEntry : Mod
         int top = int.MaxValue;
         int bottom = int.MinValue;
 
-        this.LogDebug($"[RepositionLowerPanel] inventory.Count={menu.inventory.inventory.Count} capacity={menu.inventory.capacity} rows={menu.inventory.rows}");
+        if (this.ShouldLogDebug())
+        {
+            this.LogDebug($"[RepositionLowerPanel] inventory.Count={menu.inventory.inventory.Count} capacity={menu.inventory.capacity} rows={menu.inventory.rows}");
+        }
 
         foreach (ClickableComponent slot in menu.inventory.inventory)
         {
@@ -1181,7 +1307,11 @@ public sealed class ModEntry : Mod
 
         if (top == int.MaxValue || bottom == int.MinValue)
         {
-            this.LogDebug($"[RepositionLowerPanel] No valid slots found, skipping.");
+            if (this.ShouldLogDebug())
+            {
+                this.LogDebug($"[RepositionLowerPanel] No valid slots found, skipping.");
+            }
+
             return;
         }
 
@@ -1190,7 +1320,10 @@ public sealed class ModEntry : Mod
         menu.yPositionOnScreen = lowerBackgroundTop - LowerPanelTopOffset;
         menu.height = lowerBackgroundBottom - lowerBackgroundTop + IClickableMenu.borderWidth + IClickableMenu.spaceToClearTopBorder + 192;
 
-        this.LogDebug($"[RepositionLowerPanel] top={top} bottom={bottom} menu.yPositionOnScreen={menu.yPositionOnScreen} menu.height={menu.height}");
+        if (this.ShouldLogDebug())
+        {
+            this.LogDebug($"[RepositionLowerPanel] top={top} bottom={bottom} menu.yPositionOnScreen={menu.yPositionOnScreen} menu.height={menu.height}");
+        }
     }
 
     private int GetChestsAnywhereWidgetXOffsetCore()
@@ -1225,6 +1358,8 @@ public sealed class ModEntry : Mod
         this.config.MiniFridgeRows = this.Clamp(this.config.MiniFridgeRows, MinMiniFridgeRows, MaxRows, nameof(this.config.MiniFridgeRows));
         this.config.JunimoChestColumns = this.Clamp(this.config.JunimoChestColumns, MinJunimoChestColumns, MaxColumns, nameof(this.config.JunimoChestColumns));
         this.config.JunimoChestRows = this.Clamp(this.config.JunimoChestRows, MinJunimoChestRows, MaxRows, nameof(this.config.JunimoChestRows));
+        this.config.JunimoHutColumns = this.Clamp(this.config.JunimoHutColumns, MinJunimoHutColumns, MaxColumns, nameof(this.config.JunimoHutColumns));
+        this.config.JunimoHutRows = this.Clamp(this.config.JunimoHutRows, MinJunimoHutRows, MaxRows, nameof(this.config.JunimoHutRows));
         this.config.AutoGrabberColumns = this.Clamp(this.config.AutoGrabberColumns, MinAutoGrabberColumns, MaxColumns, nameof(this.config.AutoGrabberColumns));
         this.config.AutoGrabberRows = this.Clamp(this.config.AutoGrabberRows, MinAutoGrabberRows, MaxRows, nameof(this.config.AutoGrabberRows));
         this.config.ChestBackgroundHeightOffset = this.Clamp(this.config.ChestBackgroundHeightOffset, MinLayoutOffset, MaxLayoutOffset, nameof(this.config.ChestBackgroundHeightOffset));
@@ -1361,6 +1496,22 @@ public sealed class ModEntry : Mod
         lock (ConfigLock)
         {
             this.config.JunimoChestRows = value;
+        }
+    }
+
+    private void SetJunimoHutColumns(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.JunimoHutColumns = value;
+        }
+    }
+
+    private void SetJunimoHutRows(int value)
+    {
+        lock (ConfigLock)
+        {
+            this.config.JunimoHutRows = value;
         }
     }
 
@@ -1645,7 +1796,7 @@ public sealed class ModEntry : Mod
 
     private static bool TryRegisterAutoGrabberHoldingChest(Chest chest, out StardewValley.Object owner)
     {
-        if (!Context.IsWorldReady)
+        if (!Context.IsWorldReady || chest.Location is not null)
         {
             owner = null!;
             return false;
@@ -1660,6 +1811,70 @@ public sealed class ModEntry : Mod
                 {
                     AutoGrabberChests.GetValue(chest, _ => obj);
                     owner = obj;
+                    return true;
+                }
+            }
+        }
+
+        owner = null!;
+        return false;
+    }
+
+    private void RegisterJunimoHutsInLoadedLocations()
+    {
+        foreach (GameLocation location in Game1.locations)
+        {
+            this.RegisterJunimoHutsInLocation(location);
+        }
+    }
+
+    private void RegisterJunimoHutsInLocation(GameLocation location)
+    {
+        foreach (Building building in location.buildings)
+        {
+            RegisterJunimoHutOutputChest(building);
+        }
+    }
+
+    private static bool TryGetJunimoHutOwner(Chest chest, out JunimoHut owner)
+    {
+        if (JunimoHutChests.TryGetValue(chest, out JunimoHut? existingOwner))
+        {
+            owner = existingOwner;
+            return true;
+        }
+
+        return TryRegisterJunimoHutHoldingChest(chest, out owner);
+    }
+
+    private static bool RegisterJunimoHutOutputChest(object? target)
+    {
+        if (target is not JunimoHut hut)
+        {
+            return false;
+        }
+
+        Chest outputChest = hut.GetOutputChest();
+        JunimoHutChests.GetValue(outputChest, _ => hut);
+        return true;
+    }
+
+    private static bool TryRegisterJunimoHutHoldingChest(Chest chest, out JunimoHut owner)
+    {
+        if (!Context.IsWorldReady || chest.Location is not null)
+        {
+            owner = null!;
+            return false;
+        }
+
+        foreach (GameLocation location in Game1.locations)
+        {
+            foreach (Building building in location.buildings)
+            {
+                if (building is JunimoHut hut && ReferenceEquals(hut.GetOutputChest(), chest))
+                {
+                    JunimoHutChests.GetValue(chest, _ => hut);
+                    owner = hut;
                     return true;
                 }
             }
@@ -1699,6 +1914,62 @@ public sealed class ModEntry : Mod
     {
         // InventoryMenu slot rows are spaced by 68px, with a small vanilla-style bottom margin.
         return rows * 68 + 4 + this.config.ChestBackgroundHeightOffset;
+    }
+
+    private int GetAdaptiveVisibleRows(int columns, int configuredRows, int itemCount, bool canGrowBeyondConfiguredRows)
+    {
+        int configuredCapacity = configuredRows * columns;
+        int itemRows = itemCount <= 0
+            ? 0
+            : (itemCount + columns - 1) / columns;
+        int desiredRows = configuredRows;
+
+        if (canGrowBeyondConfiguredRows && itemRows > configuredRows)
+        {
+            desiredRows = itemRows;
+        }
+
+        int maxFittingRows = this.GetMaxFittingRows(desiredRows);
+        if (desiredRows <= maxFittingRows)
+        {
+            return desiredRows;
+        }
+
+        int effectiveItemRows = canGrowBeyondConfiguredRows
+            ? itemRows
+            : System.Math.Min(itemRows, configuredRows);
+        int requiredUsableRows = System.Math.Max(MinRegularChestRows, effectiveItemRows);
+        if (itemCount < configuredCapacity)
+        {
+            requiredUsableRows = System.Math.Min(desiredRows, System.Math.Max(requiredUsableRows, effectiveItemRows + 1));
+        }
+
+        int visibleRows = System.Math.Max(maxFittingRows, requiredUsableRows);
+        if (visibleRows < desiredRows && this.ShouldLogDebug())
+        {
+            this.LogDebug($"[AdaptiveDisplay] Reduced visible rows from {desiredRows} to {visibleRows} for {columns} columns at viewport height {Game1.uiViewport.Height}.");
+        }
+
+        return visibleRows;
+    }
+
+    private int GetMaxFittingRows(int requestedRows)
+    {
+        int rows = System.Math.Max(MinRegularChestRows, requestedRows);
+        int viewportHeight = System.Math.Max(0, Game1.uiViewport.Height - 32);
+        while (rows > MinRegularChestRows && this.GetStorageAssemblyHeight(rows) > viewportHeight)
+        {
+            rows--;
+        }
+
+        return rows;
+    }
+
+    private int GetStorageAssemblyHeight(int rows)
+    {
+        int chestMenuHeight = this.GetChestMenuHeight(rows);
+        int chestPanelHeight = chestMenuHeight + IClickableMenu.spaceToClearTopBorder + IClickableMenu.borderWidth * 2;
+        return chestPanelHeight + PanelGap + LowerPanelHeight;
     }
 
     private int Clamp(int value, int min, int max, string fieldName)

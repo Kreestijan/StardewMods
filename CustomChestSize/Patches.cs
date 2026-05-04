@@ -7,7 +7,6 @@ using System.Linq;
 using StardewModdingAPI.Events;
 using StardewValley;
 using StardewValley.Menus;
-using StardewValley.Locations;
 using StardewValley.Objects;
 
 namespace CustomChestSize;
@@ -52,20 +51,33 @@ internal static class Patches
     [HarmonyPatch(typeof(Chest), nameof(Chest.GetActualCapacity))]
     private static void Chest_GetActualCapacity_Postfix(Chest __instance, ref int __result)
     {
-        if (suppressCustomCapacityDepth > 0)
-        {
-            return;
-        }
-
-        if (!ModEntry.IsUnlimitedStorageLoaded() && ModEntry.TryGetAutoGrabberLayout(__instance, out ChestGridLayout autoGrabberLayout))
+        // Auto-grabbers store items in a vanilla internal Chest, but Unlimited Storage
+        // doesn't manage that internal chest. Handle it before the general yield path
+        // so auto-grabber capacity stays tied to our configured layout.
+        if (ModEntry.TryGetAutoGrabberLayout(__instance, out ChestGridLayout autoGrabberLayout))
         {
             __result = autoGrabberLayout.Capacity;
             return;
         }
 
-        if (!ModEntry.IsUnlimitedStorageLoaded() && Game1.gameMode == 3)
+        if (suppressCustomCapacityDepth > 0)
         {
-            __result = ModEntry.GetConfiguredCapacity(__instance, __result);
+            return;
+        }
+
+        if (ModEntry.IsUnlimitedStorageLoaded())
+        {
+            return;
+        }
+
+        if (!ModEntry.TryGetStorageInfo(__instance, out StorageInfo storage))
+        {
+            return;
+        }
+
+        if (storage.Kind == StorageKind.JunimoHut || Game1.gameMode == 3)
+        {
+            __result = storage.Layout.Capacity;
         }
     }
 
@@ -147,38 +159,6 @@ internal static class Patches
         return __exception;
     }
 
-    [HarmonyPostfix]
-    [HarmonyPriority(Priority.Last)]
-    [HarmonyPatch(
-        typeof(ItemGrabMenu),
-        MethodType.Constructor,
-        new[]
-        {
-            typeof(System.Collections.Generic.IList<StardewValley.Item>),
-            typeof(bool),
-            typeof(bool),
-            typeof(InventoryMenu.highlightThisItem),
-            typeof(ItemGrabMenu.behaviorOnItemSelect),
-            typeof(string),
-            typeof(ItemGrabMenu.behaviorOnItemSelect),
-            typeof(bool),
-            typeof(bool),
-            typeof(bool),
-            typeof(bool),
-            typeof(bool),
-            typeof(int),
-            typeof(StardewValley.Item),
-            typeof(int),
-            typeof(object),
-            typeof(ItemExitBehavior),
-            typeof(bool)
-        }
-    )]
-    private static void ItemGrabMenu_Constructor_Postfix(ItemGrabMenu __instance)
-    {
-        ModEntry.ApplyLayoutIfNeeded(__instance);
-    }
-
     internal static void ItemGrabMenu_AnyConstructor_Postfix(ItemGrabMenu __instance)
     {
         ModEntry.ApplyLayoutIfNeeded(__instance);
@@ -197,12 +177,16 @@ internal static class Patches
     [HarmonyPatch(typeof(ItemGrabMenu), nameof(ItemGrabMenu.setSourceItem))]
     private static void ItemGrabMenu_SetSourceItem_Postfix(ItemGrabMenu __instance, StardewValley.Item item, object? __state)
     {
-        // Auto-grabber: the game's setSourceItem reconstructs ItemsToGrabMenu with
-        // vanilla defaults, so always re-apply the auto grabber layout regardless
-        // of the source value (some mods use source_farmhand for item transfers).
+        // Auto-grabber: vanilla rebuilds the whole menu before calling setSourceItem
+        // after transfers. If our constructor postfix already applied the layout,
+        // don't rebuild it a second time in the same click.
         if (ModEntry.IsAutoGrabber(item) || ModEntry.IsAutoGrabber(__instance.context))
         {
-            ModEntry.ApplyLayoutIfNeeded(__instance);
+            if (!ModEntry.TryGetLayoutState(__instance, out ChestMenuLayoutState autoState) || !autoState.IsAutoGrabber)
+            {
+                ModEntry.ApplyLayoutIfNeeded(__instance);
+            }
+
             return;
         }
 
@@ -221,9 +205,16 @@ internal static class Patches
 
         // Skip full layout rebuild if the source chest hasn't actually changed —
         // some mods call setSourceItem on item transfers, and rebuilding 300+
-        // clickable components per click causes visible stutter.
+        // clickable components per click causes visible stutter. The adaptive
+        // display path is the exception: when visible slots fill up, rebuild once
+        // so the user gets the next row without needing to close the menu.
         if (__state is Chest oldChest && ReferenceEquals(oldChest, item))
         {
+            if (ModEntry.ShouldRefreshVisibleLayout(__instance))
+            {
+                ModEntry.ApplyLayoutIfNeeded(__instance);
+            }
+
             return;
         }
 
@@ -597,8 +588,7 @@ internal static class Patches
             return false;
         }
 
-        FarmHouse? farmHouse = Game1.getLocationFromName("farmHouse") as FarmHouse;
-        if (openChest == farmHouse?.fridge.Value
+        if (ModEntry.IsBuiltInFridge(openChest)
             || Game1.activeClickableMenu is null
             || !openChest.playerChest.Value)
         {
@@ -719,6 +709,11 @@ internal static class Patches
 
     private static Chest? ResolveCategorizeChestsChest(ItemGrabMenu menu)
     {
+        if (ModEntry.TryGetStorageInfo(menu, out StorageInfo storage))
+        {
+            return storage.Chest;
+        }
+
         object? target = ((Delegate?)(object?)menu.behaviorOnItemGrab)?.Target;
         if (target is Chest behaviorTargetChest)
         {

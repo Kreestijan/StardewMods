@@ -43,6 +43,11 @@
   "gmcm.junimoChest.columns.tooltip": "How many slots each row has in a junimo chest.",
   "gmcm.junimoChest.rows.tooltip": "How many rows a junimo chest has.",
 
+  "gmcm.junimoHut.title": "Junimo Hut",
+  "gmcm.junimoHut.tooltip": "Configure Junimo Hut output storage size.",
+  "gmcm.junimoHut.columns.tooltip": "How many slots each row has in a Junimo Hut output chest.",
+  "gmcm.junimoHut.rows.tooltip": "How many rows a Junimo Hut output chest has.",
+
   "gmcm.autoGrabber.title": "Auto-Grabber",
   "gmcm.autoGrabber.tooltip": "Configure auto-grabber storage grid size.",
   "gmcm.autoGrabber.columns.tooltip": "How many slots each row has in an auto-grabber.",

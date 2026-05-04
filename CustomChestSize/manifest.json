@@ -2,7 +2,7 @@
   "Name": "Custom Chest Size",
   "Author": "Kree",
   "Version": "1.0.0",
-  "Description": "Lets you set rows and columns for regular chests, big chests, stone chests, fridges, mini-fridges, and junimo chests through config or GMCM.",
+  "Description": "Lets you set rows and columns for regular chests, big chests, stone chests, fridges, mini-fridges, junimo chests, Junimo Hut output, and auto-grabbers through config or GMCM.",
   "UniqueID": "Kree.CustomChestSize",
   "EntryDll": "CustomChestSize.dll",
   "MinimumApiVersion": "4.0.0",

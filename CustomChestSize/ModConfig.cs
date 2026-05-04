@@ -30,6 +30,10 @@ internal sealed class ModConfig
 
     public int JunimoChestRows { get; set; } = 7;
 
+    public int JunimoHutColumns { get; set; } = 17;
+
+    public int JunimoHutRows { get; set; } = 7;
+
     public int AutoGrabberColumns { get; set; } = 24;
 
     public int AutoGrabberRows { get; set; } = 12;
