@@ -47,10 +47,11 @@ public sealed class ModEntry : Mod
             this.ModManifest,
             getValue: () => this.Config.EnableMod,
             setValue: value => this.Config.EnableMod = value,
-            name: () => "Enable mod",
-            tooltip: () => "Adds an \"Eat until full\" option to food confirmation dialogues."
+            name: () => this.Translate("gmcm.enable-mod.name"),
+            tooltip: () => this.Translate("gmcm.enable-mod.tooltip")
         );
 
+        string[] fillTargets = Enum.GetNames<FillTarget>();
         gmcm.AddTextOption(
             this.ModManifest,
             getValue: () => this.Config.FillTarget.ToString(),
@@ -59,9 +60,10 @@ public sealed class ModEntry : Mod
                 if (System.Enum.TryParse<FillTarget>(value, out var target))
                     this.Config.FillTarget = target;
             },
-            name: () => "Fill target",
-            tooltip: () => "Which stat to fill when eating until full.",
-            allowedValues: new[] { "Energy", "Health" }
+            name: () => this.Translate("gmcm.fill-target.name"),
+            tooltip: () => this.Translate("gmcm.fill-target.tooltip"),
+            allowedValues: fillTargets,
+            formatValue: value => this.Translate($"gmcm.fill-target.{value.ToLowerInvariant()}")
         );
     }
 

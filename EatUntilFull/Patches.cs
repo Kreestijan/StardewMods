@@ -8,7 +8,10 @@ namespace EatUntilFull;
 [HarmonyPatch]
 internal static class Patches
 {
+    private const string EatUntilFullResponseKey = "EatUntilFull";
+
     private static Object? _pendingFood;
+    private static bool _pendingFoodFromObjectAction;
 
     /// <summary>
     /// Intercept food interaction from the active slot or world.
@@ -21,10 +24,13 @@ internal static class Patches
         if (!ModEntry.Instance.Config.EnableMod || justCheckingForActivity)
             return true;
 
+        ClearPendingFood();
+
         if (__instance.Edibility <= 0 || __instance.Stack < 2)
             return true;
 
         _pendingFood = __instance;
+        _pendingFoodFromObjectAction = true;
         ShowEatDialogue(who, __instance);
         return false;
     }
@@ -40,14 +46,19 @@ internal static class Patches
         if (!ModEntry.Instance.Config.EnableMod || dialogKey != "Eat")
             return;
 
-        if (_pendingFood is null)
+        if (!_pendingFoodFromObjectAction)
             _pendingFood = DetectFoodFromGameState();
 
-        if (_pendingFood is null || _pendingFood.Edibility <= 0 || _pendingFood.Stack < 2)
+        _pendingFoodFromObjectAction = false;
+
+        if (!IsEligibleFood(_pendingFood))
+        {
+            ClearPendingFood();
             return;
+        }
 
         var list = answerChoices.ToList();
-        list.Insert(list.Count - 1, new Response("EatUntilFull", ModEntry.Instance.Translate("dialogue.eat-until-full")));
+        list.Insert(list.Count - 1, new Response(EatUntilFullResponseKey, ModEntry.Instance.Translate("dialogue.eat-until-full")));
         answerChoices = list.ToArray();
     }
 
@@ -58,11 +69,19 @@ internal static class Patches
     [HarmonyPatch(typeof(GameLocation), nameof(GameLocation.answerDialogue))]
     private static bool GameLocation_answerDialogue_Prefix(Response answer)
     {
-        if (answer.responseKey != "EatUntilFull")
+        if (answer.responseKey != EatUntilFullResponseKey)
             return true;
 
         HandleEatUntilFull();
         return false;
+    }
+
+    [HarmonyPostfix]
+    [HarmonyPatch(typeof(GameLocation), nameof(GameLocation.answerDialogue))]
+    private static void GameLocation_answerDialogue_Postfix(Response answer)
+    {
+        if (answer.responseKey != EatUntilFullResponseKey)
+            ClearPendingFood();
     }
 
     private static Object? DetectFoodFromGameState()
@@ -97,7 +116,7 @@ internal static class Patches
         who.currentLocation?.createQuestionDialogue(
             question,
             [
-                new("EatUntilFull", ModEntry.Instance.Translate("dialogue.eat-until-full")),
+                new(EatUntilFullResponseKey, ModEntry.Instance.Translate("dialogue.eat-until-full")),
                 new("Yes", yesText),
                 new("No", noText)
             ],
@@ -107,14 +126,14 @@ internal static class Patches
 
     private static void HandleEatUntilFull()
     {
-        if (_pendingFood is null || _pendingFood.Edibility <= 0)
+        Object? food = _pendingFood;
+        ClearPendingFood();
+
+        if (food is null || food.Edibility <= 0)
         {
             ShowTransientMessage("Nothing to eat.");
             return;
         }
-
-        Object food = _pendingFood;
-        _pendingFood = null;
 
         // Use SDV's own recovery formulas which account for quality and special items
         int staminaPerItem = food.staminaRecoveredOnConsumption();
@@ -209,5 +228,16 @@ internal static class Patches
     private static void ShowTransientMessage(string message)
     {
         Game1.addHUDMessage(new HUDMessage(message, HUDMessage.error_type));
+    }
+
+    private static bool IsEligibleFood(Object? food)
+    {
+        return food is { Edibility: > 0, Stack: >= 2 };
+    }
+
+    private static void ClearPendingFood()
+    {
+        _pendingFood = null;
+        _pendingFoodFromObjectAction = false;
     }
 }

@@ -1,4 +1,10 @@
 {
+  "gmcm.enable-mod.name": "Enable mod",
+  "gmcm.enable-mod.tooltip": "Adds an \"Eat until full\" option to food confirmation dialogues.",
+  "gmcm.fill-target.name": "Fill target",
+  "gmcm.fill-target.tooltip": "Which stat to fill when eating until full.",
+  "gmcm.fill-target.energy": "Energy",
+  "gmcm.fill-target.health": "Health",
   "dialogue.eat-until-full": "Eat until full",
   "message.no-energy": "This item doesn't provide energy.",
   "message.no-health": "This item doesn't provide health.",
