@@ -2,7 +2,6 @@ using HarmonyLib;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
-using StardewValley.Menus;
 
 namespace PetWhileSleeping;
 
@@ -19,6 +18,7 @@ public sealed class ModEntry : Mod
     {
         Instance = this;
         this.config = helper.ReadConfig<ModConfig>();
+        this.ClampConfig();
 
         this.harmony = new Harmony(this.ModManifest.UniqueID);
         this.harmony.PatchAll();
@@ -26,106 +26,45 @@ public sealed class ModEntry : Mod
         helper.Events.GameLoop.GameLaunched += this.OnGameLaunched;
     }
 
-    internal static bool ShouldHandleSleepingPet(FarmAnimal animal, Farmer who, bool isAutoPet)
+    internal static int GetTimeOfDayForPetSleepCheck()
     {
-        if (!Instance.config.EnableMod || isAutoPet)
-        {
-            return false;
-        }
-
-        return Game1.timeOfDay >= 1900 && !animal.isMoving();
+        return Instance.config.EnableMod ? 0 : Game1.timeOfDay;
     }
 
-    internal static void PetSleepingAnimal(FarmAnimal animal, Farmer who)
+    internal static SleepingPetContext? BeginSleepingPet(FarmAnimal animal, Farmer who, bool isAutoPet)
     {
-        if (who.FarmerSprite.PauseForSingleAnimation)
+        if (!Instance.config.EnableMod || isAutoPet || !IsSleepingPetAttempt(animal))
+        {
+            return null;
+        }
+
+        return new SleepingPetContext(
+            WasPetBefore: animal.wasPet.Value,
+            FriendshipBefore: animal.friendshipTowardFarmer.Value
+        );
+    }
+
+    internal static void ApplySleepingFriendshipPenalty(FarmAnimal animal, SleepingPetContext? context)
+    {
+        int penaltyPercent = Instance.config.SleepingFriendshipPenaltyPercent;
+        if (context is null || penaltyPercent <= 0 || context.WasPetBefore || !animal.wasPet.Value)
         {
             return;
         }
 
-        who.Halt();
-        who.faceGeneralDirection(animal.Position, 0, opposite: false, useTileCalculations: false);
-
-        animal.Halt();
-        animal.Sprite.StopAnimation();
-        animal.uniqueFrameAccumulator = -1;
-
-        switch (Game1.player.FacingDirection)
+        int friendshipGain = animal.friendshipTowardFarmer.Value - context.FriendshipBefore;
+        if (friendshipGain <= 0)
         {
-            case 0:
-                animal.Sprite.currentFrame = 0;
-                break;
-            case 1:
-                animal.Sprite.currentFrame = 12;
-                break;
-            case 2:
-                animal.Sprite.currentFrame = 8;
-                break;
-            case 3:
-                animal.Sprite.currentFrame = 4;
-                break;
-        }
-
-        if (!animal.hasEatenAnimalCracker.Value && who.ActiveObject?.QualifiedItemId == "(O)GoldenAnimalCracker")
-        {
-            if ((!(animal.GetAnimalData()?.CanEatGoldenCrackers)) ?? false)
-            {
-                Game1.playSound("cancel");
-                animal.doEmote(8);
-                return;
-            }
-
-            animal.hasEatenAnimalCracker.Value = true;
-            Game1.playSound("give_gift");
-            animal.doEmote(56);
-            Game1.player.reduceActiveItemByOne();
             return;
         }
 
-        if (!animal.wasPet.Value)
-        {
-            bool shouldShowMessage = Instance.config.ShowSleepingPetMessage
-                && who.ActiveObject?.QualifiedItemId != "(O)GoldenAnimalCracker";
+        int penalty = friendshipGain * penaltyPercent / 100;
+        animal.friendshipTowardFarmer.Value = Math.Max(0, animal.friendshipTowardFarmer.Value - penalty);
+    }
 
-            animal.wasPet.Value = true;
-
-            int friendshipGainIfAutoPettedFirst = 7;
-            if (animal.wasAutoPet.Value)
-            {
-                animal.friendshipTowardFarmer.Value = Math.Min(1000, animal.friendshipTowardFarmer.Value + friendshipGainIfAutoPettedFirst);
-            }
-            else
-            {
-                animal.friendshipTowardFarmer.Value = Math.Min(1000, animal.friendshipTowardFarmer.Value + 15);
-            }
-
-            var animalData = animal.GetAnimalData();
-            int happinessGain = Math.Max(5, 30 + (animalData?.HappinessDrain ?? 0));
-
-            if (animalData != null && animalData.ProfessionForHappinessBoost >= 0 && who.professions.Contains(animalData.ProfessionForHappinessBoost))
-            {
-                animal.friendshipTowardFarmer.Value = Math.Min(1000, animal.friendshipTowardFarmer.Value + 15);
-                animal.happiness.Value = Math.Min(255, animal.happiness.Value + happinessGain);
-            }
-
-            int emote = animal.wasAutoPet.Value ? 32 : 20;
-            animal.doEmote(animal.moodMessage.Value == 4 ? 12 : emote);
-            animal.happiness.Value = Math.Min(255, animal.happiness.Value + happinessGain);
-            animal.makeSound();
-            who.gainExperience(0, 5);
-
-            if (shouldShowMessage)
-            {
-                Game1.drawObjectDialogue($"{animal.displayName} is sleeping, but you pet them gently.");
-            }
-
-            return;
-        }
-
-        if (who.ActiveObject?.QualifiedItemId != "(O)178")
-        {
-            Game1.activeClickableMenu = new AnimalQueryMenu(animal);
-        }
+    private static bool IsSleepingPetAttempt(FarmAnimal animal)
+    {
+        return Game1.timeOfDay >= 1900 && !animal.isMoving();
     }
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
@@ -150,12 +89,17 @@ public sealed class ModEntry : Mod
             name: () => "Enable mod",
             tooltip: () => "If enabled, you can still pet sleeping farm animals and gain friendship at night."
         );
-        gmcm.AddBoolOption(
+
+        gmcm.AddNumberOption(
             this.ModManifest,
-            getValue: () => this.config.ShowSleepingPetMessage,
-            setValue: value => this.config.ShowSleepingPetMessage = value,
-            name: () => "Show sleep message",
-            tooltip: () => "If enabled, sleeping animals show a custom message when you pet them at night."
+            getValue: () => this.config.SleepingFriendshipPenaltyPercent,
+            setValue: value => this.config.SleepingFriendshipPenaltyPercent = Math.Clamp(value, 0, 100),
+            name: () => "Sleeping friendship penalty",
+            tooltip: () => "Percent of vanilla friendship gain removed when petting an animal while it is sleeping.",
+            min: 0,
+            max: 100,
+            interval: 5,
+            formatValue: value => $"{value}%"
         );
     }
 
@@ -166,6 +110,14 @@ public sealed class ModEntry : Mod
 
     private void SaveConfig()
     {
+        this.ClampConfig();
         this.Helper.WriteConfig(this.config);
     }
+
+    private void ClampConfig()
+    {
+        this.config.SleepingFriendshipPenaltyPercent = Math.Clamp(this.config.SleepingFriendshipPenaltyPercent, 0, 100);
+    }
 }
+
+internal sealed record SleepingPetContext(bool WasPetBefore, int FriendshipBefore);
