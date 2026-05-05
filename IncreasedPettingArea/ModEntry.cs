@@ -57,7 +57,7 @@ public sealed class ModEntry : Mod
             setValue: value => this.Config.PetRadius = value,
             name: () => this.Translate("gmcm.pet-radius.name"),
             tooltip: () => this.Translate("gmcm.pet-radius.tooltip"),
-            min: 3,
+            min: 1,
             max: 20,
             interval: 1
         );

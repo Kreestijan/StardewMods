@@ -1,4 +1,12 @@
 {
   "gmcm.enable-mod.name": "Enable mod",
-  "gmcm.enable-mod.tooltip": "If enabled, farm animals are passable and the farmer can walk through them."
+  "gmcm.enable-mod.tooltip": "If enabled, farm animals are passable and the farmer can walk through them.",
+  "gmcm.enable-nudge.name": "Enable nudge",
+  "gmcm.enable-nudge.tooltip": "If enabled, animals are visually shoved aside when you walk through them.",
+  "gmcm.nudge-strength.name": "Nudge strength",
+  "gmcm.nudge-strength.tooltip": "How far animals visually move out of the way.",
+  "gmcm.nudge-duration.name": "Nudge duration",
+  "gmcm.nudge-duration.tooltip": "How long the visual nudge animation lasts.",
+  "gmcm.nudge-cooldown.name": "Nudge cooldown",
+  "gmcm.nudge-cooldown.tooltip": "Minimum delay before the same animal can be nudged again."
 }
