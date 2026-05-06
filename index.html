@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TOF Fish Editor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <h1>TOF Fish Editor</h1>
+        <p>Edit <code>fishes.json</code> visually and generate the Content Patcher files.</p>
+      </div>
+      <div class="toolbar">
+        <button id="open-source">Open fishes.json</button>
+        <button id="save-source">Save fishes.json</button>
+        <button id="download-source">Download fishes.json</button>
+        <button id="write-pack">Write generated pack files</button>
+      </div>
+    </header>
+
+    <section class="meta card">
+      <h2>Pack Meta</h2>
+      <p class="section-copy">These values become your generated <code>manifest.json</code>. You usually only set them once per pack.</p>
+      <div class="grid meta-grid">
+        <label>Pack name<input id="packName" type="text"><small class="hint">Player-facing mod name.</small></label>
+        <label>Author<input id="author" type="text"><small class="hint">Shown in the manifest.</small></label>
+        <label>Version<input id="version" type="text"><small class="hint">Use semantic-style versions like <code>1.0.0</code>.</small></label>
+        <label>Unique ID<input id="uniqueId" type="text"><small class="hint">Must be unique across mods, usually <code>Author.ModName</code>.</small></label>
+        <label>Minimum API<input id="minimumApiVersion" type="text"><small class="hint">Minimum SMAPI version required by the generated pack.</small></label>
+        <label>Pond prefix<input id="pondPrefix" type="text"><small class="hint">Internal prefix used for pond data IDs and custom tags.</small></label>
+        <label>Texture file<input id="objectsTextureFile" type="text"><small class="hint">Relative path to the fish item spritesheet file.</small></label>
+        <label>Texture target<input id="objectsTextureTarget" type="text"><small class="hint">The internal mod asset path Content Patcher loads the texture into.</small></label>
+        <label class="wide">Description<textarea id="description" rows="2"></textarea><small class="hint">Short player-facing description for the generated manifest.</small></label>
+      </div>
+    </section>
+
+    <div class="main">
+      <aside class="sidebar card">
+        <div class="sidebar-layout">
+          <section class="sidebar-column">
+            <div class="sidebar-head">
+              <h2>Fish</h2>
+              <div class="stack">
+                <button id="add-fish">Add fish</button>
+                <button id="duplicate-fish">Duplicate</button>
+                <button id="delete-fish" class="danger">Delete</button>
+              </div>
+            </div>
+            <div id="fish-list" class="fish-list"></div>
+          </section>
+
+          <section class="sprite-panel">
+            <div class="section-head">
+              <div>
+                <h2>Sprite Editor</h2>
+                <p id="spriteEditorLabel" class="section-copy">Draw the selected fish sprite here.</p>
+              </div>
+              <div class="stack">
+                <button id="save-sprite">Save sprite</button>
+                <button id="download-atlas">Download atlas PNG</button>
+              </div>
+            </div>
+              <div class="sprite-mode-row">
+                <button id="spriteEditItem" class="active" type="button">Item sprite</button>
+                <button id="spriteEditAquarium" type="button">Aquarium sprite</button>
+              </div>
+              <div class="sprite-layout">
+                <div class="sprite-stage">
+                  <div class="sprite-frame">
+                    <div id="spriteEditorGrid" class="sprite-grid" aria-label="Fish sprite editor" tabindex="0">
+                      <canvas id="spriteEditorCanvas" width="384" height="384" aria-label="Fish sprite editor canvas"></canvas>
+                    </div>
+                  </div>
+                  <small class="hint">The grid size changes with the current sprite mode. Click a square to paint it with the chosen color. Press <code>Ctrl+V</code> to paste an image from the clipboard. Click <code>Save sprite</code> to commit the current draft into <code>fishes.json</code> data.</small>
+                </div>
+                <div class="sprite-tools">
+                  <div class="sprite-preview-card">
+                    <strong>Preview</strong>
+                    <div class="sprite-preview-frame">
+                      <canvas id="spritePreviewCanvas" width="32" height="32" aria-label="Fish sprite preview"></canvas>
+                    </div>
+                  </div>
+                  <label>Paint color
+                    <input id="spriteColor" type="color" value="#6f92b8">
+                    <small class="hint">Click a pixel in the grid to fill it with this color.</small>
+                  </label>
+                  <div class="sprite-palette-card">
+                    <div class="product-card-head">
+                      <strong>Swatch palette</strong>
+                      <button id="save-swatch" type="button">Save current color</button>
+                    </div>
+                    <div id="spritePalette" class="sprite-palette"></div>
+                    <small class="hint">Click a swatch to reuse it later. Remove a swatch with its × button.</small>
+                  </div>
+                  <div class="sprite-tool-row simple">
+                    <button id="spritePaintTool" class="active" type="button">Paint mode</button>
+                    <button id="spriteEraseTool" type="button">Erase mode</button>
+                  </div>
+                  <div class="sprite-tool-row simple">
+                    <button id="spritePickColorTool" type="button">Pick color</button>
+                    <button id="spriteDodgeTool" type="button">Dodge</button>
+                  </div>
+                  <div class="sprite-tool-row simple">
+                    <button id="spriteBurnTool" type="button">Burn</button>
+                    <button id="mirrorSprite" type="button">Mirror</button>
+                  </div>
+                  <div class="sprite-tool-row simple">
+                    <button id="spriteBackgroundToggle" type="button">Black bg</button>
+                    <button id="spriteTransformMoveScale" type="button">Move/scale mode</button>
+                  </div>
+                  <div class="sprite-tool-row simple">
+                    <button id="spriteTransformRotate" type="button">Rotate drag mode</button>
+                  </div>
+                  <small class="hint">Dodge lightens existing pixels and burn darkens them. Use the background toggle to swap between white and black while you edit. With move/scale mode on, drag inside the sprite bounds to move it and drag the bottom-right handle to scale it. With rotate drag mode on, drag around the center of the sprite to rotate the current draft freely.</small>
+                  <div id="aquariumControls" class="aquarium-controls hidden">
+                    <div class="aquarium-card">
+                      <div class="section-head compact">
+                        <strong>Aquarium setup</strong>
+                        <label class="checkbox aquarium-inline-toggle"><input id="aquariumEnabled" type="checkbox"> Enable</label>
+                      </div>
+                      <div id="aquariumStatus" class="item-name"></div>
+                      <label>Aquarium movement type
+                        <select id="aquariumType">
+                          <option value="fish">fish</option>
+                          <option value="eel">eel</option>
+                          <option value="float">float</option>
+                          <option value="ground">ground</option>
+                          <option value="static">static</option>
+                          <option value="crawl">crawl</option>
+                          <option value="front_crawl">front_crawl</option>
+                          <option value="cephalopod">cephalopod</option>
+                        </select>
+                        <small id="aquariumTypeHint" class="hint">This is the raw aquarium movement type written to <code>Data/AquariumFish</code>.</small>
+                      </label>
+                    </div>
+                    <div class="aquarium-card">
+                      <div class="section-head compact">
+                        <strong>Aquarium frames</strong>
+                        <div class="stack">
+                          <button id="addAquariumFrame" type="button">Add frame</button>
+                          <button id="duplicateAquariumFrame" type="button">Duplicate frame</button>
+                          <button id="removeAquariumFrame" type="button" class="danger">Remove frame</button>
+                        </div>
+                      </div>
+                      <small class="hint">Each frame here is a local frame index like <code>0</code>, <code>1</code>, <code>2</code>. The selected frame is what you are editing on the grid.</small>
+                      <div id="aquariumFrameList" class="aquarium-frame-list"></div>
+                    </div>
+                    <div class="aquarium-card">
+                      <div class="section-head compact">
+                        <strong>Animation mapping</strong>
+                        <button id="autoFillAquariumMapping" type="button">Auto-fill mapping</button>
+                      </div>
+                      <small id="aquariumFieldGuide" class="hint">These fields are the raw <code>Data/AquariumFish</code> parts after the movement type. Use local frame numbers only. The editor converts them to exported atlas indexes for you.</small>
+                      <div class="aquarium-field-grid">
+                        <label>Field 3
+                          <input id="aquariumField3" type="text" placeholder="0">
+                          <small class="hint">Usually a single local frame or short frame set.</small>
+                        </label>
+                        <label>Field 4
+                          <input id="aquariumField4" type="text" placeholder="0 1 1">
+                          <small class="hint">Space-separated local frame numbers.</small>
+                        </label>
+                        <label>Field 5
+                          <input id="aquariumField5" type="text" placeholder="2 2 3 3">
+                          <small class="hint">Leave blank if this type does not use it.</small>
+                        </label>
+                        <label>Field 6
+                          <input id="aquariumField6" type="text" placeholder="4 5">
+                          <small class="hint">Leave blank if this type does not use it.</small>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="aquarium-card">
+                      <strong>Aquarium export preview</strong>
+                      <div id="aquariumEntryPreview" class="item-name"></div>
+                      <small class="hint">Aquarium frames are edited as <code>24x24</code> sprites and exported onto <code>24x48</code> aquarium sheet slots indexed through <code>Data/AquariumFish</code>. Older TOF aquarium drafts made at <code>32x32</code> are downscaled on load.</small>
+                    </div>
+                  </div>
+                  <div class="sprite-meta">
+                    <strong>Atlas</strong>
+                    <div id="spriteAtlasMeta" class="item-name"></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+        </div>
+      </aside>
+
+      <main class="editor">
+        <section class="card">
+          <div class="section-head">
+            <h2>Templates</h2>
+            <span class="section-copy">Apply one of these to the currently selected fish. They change catch data, locations, and pond defaults, but keep your current slug, name, sprite index, and description.</span>
+          </div>
+          <div class="preset-grid">
+            <button type="button" class="preset-button" data-preset="easyLake">Easy lake fish</button>
+            <button type="button" class="preset-button" data-preset="rareOcean">Rare ocean fish</button>
+            <button type="button" class="preset-button" data-preset="nightEel">Night eel style</button>
+            <button type="button" class="preset-button" data-preset="rainRiver">Rain river fish</button>
+            <button type="button" class="preset-button" data-preset="pondFriendly">Pond-friendly default</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Basics</h2>
+          <div class="grid">
+            <label>Slug<input id="slug" type="text"><small class="hint">Internal fish ID fragment. Example: <code>mirror_koi</code>.</small></label>
+            <label>Display name<input id="displayName" type="text"><small class="hint">What players see in-game.</small></label>
+            <label>Sprite index<input id="spriteIndex" type="number"><small class="hint">Which 32x32 tile in the object atlas to use, starting at 0. Double Size Sprite (DSS) handles the in-game icon scaling.</small></label>
+            <label>Price<input id="price" type="number"><small class="hint">Base sell value in gold. Fish size affects quality chance, but the final sell price itself is based on quality tiers.</small><small id="priceEstimate" class="hint">Est. sell value: normal 0g, silver 0g, gold 0g, iridium 0g.</small></label>
+            <label>Edibility<input id="edibility" type="number"><small class="hint">Food value. Negative is harmful, positive restores energy/health, and quality changes the final values.</small><small id="edibilityEstimate" class="hint">Est. restore: normal 0 energy, 0 health; silver 0 energy, 0 health; gold 0 energy, 0 health; iridium 0 energy, 0 health.</small></label>
+            <label class="checkbox"><input id="enabledByDefault" type="checkbox"> Enabled by default</label>
+            <label class="checkbox wide"><input id="isLegendary" type="checkbox"> Is Legendary?<small class="hint">Makes the fish behave like a legendary-style catch: crowned boss fish in the fishing minigame, 5x catch XP, and only catchable once per player. This does not make it one of vanilla's built-in five legendary fish.</small></label>
+            <label class="wide">Description<textarea id="fishDescription" rows="2"></textarea><small class="hint">The item tooltip text.</small></label>
+            <label class="wide">Context tags, comma-separated<textarea id="contextTags" rows="2"></textarea><small class="hint">Custom tags are allowed. The editor also auto-adds a pond tag and you usually want <code>fish_has_roe</code> if the pond should make roe.</small>
+              <div id="contextTagButtons" class="tag-button-row"></div>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Catch Data</h2>
+          <p class="section-copy">These settings define how the fish behaves and when it is eligible to spawn. Exact places are handled in the Locations section below.</p>
+          <div class="grid">
+            <label>Difficulty<input id="difficulty" type="number"><small class="hint">Fishing minigame difficulty. Roughly under 50 is easy, 80+ is hard.</small></label>
+            <label>Behavior
+              <select id="behavior">
+                <option value="mixed">mixed</option>
+                <option value="sinker">sinker</option>
+                <option value="smooth">smooth</option>
+                <option value="dart">dart</option>
+                <option value="floater">floater</option>
+              </select>
+              <small class="hint">How the fish moves in the minigame. Use the vanilla names shown here.</small>
+            </label>
+            <label>Min size<input id="minSize" type="number"><small class="hint">Minimum caught fish length.</small></label>
+            <label>Max size<input id="maxSize" type="number"><small class="hint">Maximum caught fish length.</small></label>
+            <label>Time start<input id="timeStart" type="number" placeholder="600"><small class="hint">Use Stardew time like <code>600</code> for 6:00 AM.</small></label>
+            <label>Time end<input id="timeEnd" type="number" placeholder="2600"><small class="hint">Use <code>2600</code> for 2:00 AM.</small></label>
+            <label>Weather
+              <select id="weather">
+                <option value="both">both</option>
+                <option value="sunny">sunny</option>
+                <option value="rainy">rainy</option>
+              </select>
+              <small class="hint">Allowed values are <code>both</code>, <code>sunny</code>, and <code>rainy</code>.</small>
+            </label>
+            <label>Water code<input id="waterCode" type="text"><small class="hint">Advanced legacy value. Copy a known-good pattern instead of inventing one.</small></label>
+            <label>Max depth<input id="maxDepth" type="number"><small class="hint">Target water depth before shallow-water penalties start. Typical values: <code>1</code> to <code>3</code>.</small></label>
+            <label>Base chance<input id="baseChance" type="number" step="0.01"><small class="hint">Chance from <code>0</code> to <code>1</code> before depth and luck adjustments.</small></label>
+            <label>Depth multiplier<input id="depthMultiplier" type="number" step="0.01"><small class="hint">How strongly shallow fishing lowers spawn chance.</small></label>
+            <label>Min fishing level<input id="minFishingLevel" type="number"><small class="hint">Minimum player fishing level required.</small></label>
+            <label class="wide">Seasons
+              <div id="seasonsGroup" class="season-group">
+                <label class="checkbox small"><input data-season="spring" type="checkbox"> spring</label>
+                <label class="checkbox small"><input data-season="summer" type="checkbox"> summer</label>
+                <label class="checkbox small"><input data-season="fall" type="checkbox"> fall</label>
+                <label class="checkbox small"><input data-season="winter" type="checkbox"> winter</label>
+              </div>
+              <small class="hint">Valid seasons are <code>spring</code>, <code>summer</code>, <code>fall</code>, and <code>winter</code>.</small>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <h2>Location Library</h2>
+            <input id="locationLibrarySearch" class="library-search" type="search" placeholder="Search vanilla, SVE, East Scarp, RSV locations">
+          </div>
+          <p class="section-copy">Click a location to use it. If a location field is focused, the library fills that row. Otherwise it adds a new location row. Modded examples are included as helpers, but free text still works for anything not listed here.</p>
+          <div id="locationLibraryList" class="library-list"></div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <h2>Locations</h2>
+            <button id="add-location">Add location</button>
+          </div>
+          <p class="section-copy">These are the actual locations where the fish can spawn. Free text is allowed. For modded places like SVE, East Scarp, or RSV, enter the exact internal location name used by that mod.</p>
+          <div class="table table-header">
+            <div class="row location-row header-row">
+              <strong>Location</strong>
+              <strong>Chance</strong>
+              <strong>Min shore</strong>
+              <strong>Max shore</strong>
+              <strong>Precedence</strong>
+              <strong></strong>
+            </div>
+          </div>
+          <div id="locations-table" class="table"></div>
+        </section>
+
+        <section class="card">
+          <h2>Pond</h2>
+          <p class="section-copy">These settings define fish pond behavior for this fish.</p>
+          <div class="grid">
+            <label>Spawn time<input id="pondSpawnTime" type="number"><small class="hint">Advanced pond behavior value. Leave <code>-1</code> for normal behavior unless you know you want something else.</small></label>
+            <label>Water color (R G B)<input id="pondWaterColor" type="text" placeholder="200 225 235" oninput="const parts=this.value.trim().split(/[,\s]+/).map(v=>Math.max(0,Math.min(255,parseInt(v||'0',10)||0))); const rgb=(parts.length>=3?[parts[0],parts[1],parts[2]]:[200,225,235]).join(' '); const hex='#'+(parts.length>=3?[parts[0],parts[1],parts[2]]:[200,225,235]).map(v=>v.toString(16).padStart(2,'0')).join(''); const picker=document.getElementById('pondWaterColorPicker'); const preview=document.getElementById('pondWaterColorPreview'); this.value=rgb; if(picker) picker.value=hex; if(preview){preview.style.background=hex; preview.style.backgroundColor=hex; preview.textContent=rgb;} window.tofSetPondColor&&window.tofSetPondColor(rgb,hex);" onchange="const parts=this.value.trim().split(/[,\s]+/).map(v=>Math.max(0,Math.min(255,parseInt(v||'0',10)||0))); const rgb=(parts.length>=3?[parts[0],parts[1],parts[2]]:[200,225,235]).join(' '); const hex='#'+(parts.length>=3?[parts[0],parts[1],parts[2]]:[200,225,235]).map(v=>v.toString(16).padStart(2,'0')).join(''); const picker=document.getElementById('pondWaterColorPicker'); const preview=document.getElementById('pondWaterColorPreview'); this.value=rgb; if(picker) picker.value=hex; if(preview){preview.style.background=hex; preview.style.backgroundColor=hex; preview.textContent=rgb;} window.tofSetPondColor&&window.tofSetPondColor(rgb,hex);"><small class="hint">RGB format. Use the picker if you do not want to type color codes.</small></label>
+            <label>Pond color picker<input id="pondWaterColorPicker" type="color" oninput="const hex=this.value.replace('#',''); const rgb=[parseInt(hex.slice(0,2),16)||0,parseInt(hex.slice(2,4),16)||0,parseInt(hex.slice(4,6),16)||0].join(' '); const field=document.getElementById('pondWaterColor'); const preview=document.getElementById('pondWaterColorPreview'); if(field) field.value=rgb; if(preview){preview.style.background=this.value; preview.style.backgroundColor=this.value; preview.textContent=rgb;} window.tofSetPondColor&&window.tofSetPondColor(rgb,this.value);" onchange="const hex=this.value.replace('#',''); const rgb=[parseInt(hex.slice(0,2),16)||0,parseInt(hex.slice(2,4),16)||0,parseInt(hex.slice(4,6),16)||0].join(' '); const field=document.getElementById('pondWaterColor'); const preview=document.getElementById('pondWaterColorPreview'); if(field) field.value=rgb; if(preview){preview.style.background=this.value; preview.style.backgroundColor=this.value; preview.textContent=rgb;} window.tofSetPondColor&&window.tofSetPondColor(rgb,this.value);"><small class="hint">This updates the RGB text field automatically.</small></label>
+            <label>Water min population<input id="pondWaterMinPopulation" type="number"><small class="hint">How many fish must be in the pond before the custom water color appears.</small></label>
+            <div class="color-preview-card">
+              <strong>Pond color preview</strong>
+              <div id="pondWaterColorPreview" class="color-preview-swatch"></div>
+              <small class="hint">This is just a quick preview of the selected pond tint.</small>
+            </div>
+          </div>
+          <div class="section-head">
+            <h3>Produced Items</h3>
+            <button id="add-product">Add product</button>
+          </div>
+          <p class="section-copy">Each card below is one possible pond output. Pick the item by name, then set the population threshold, chance, and quantity range. The export code is shown for reference only.</p>
+          <p class="hint">Fish ponds check these top-to-bottom and take the first valid entry that passes chance, so higher-population/special rewards should be above Roe. The editor now sorts them that way automatically.</p>
+          <div id="products-table" class="table"></div>
+          <div class="gate-sections">
+            <section class="gate-section">
+              <div class="section-head">
+                <h3>Population Gate 4</h3>
+                <button id="add-gate4">Add request</button>
+              </div>
+              <p class="section-copy">These are the items the pond can ask for before it grows from 3 fish to 4+ fish.</p>
+              <p class="hint">If you add more than one request here, the pond can choose any one of them. It does not ask for all of them at once.</p>
+              <div id="gate4Table" class="table"></div>
+            </section>
+            <section class="gate-section">
+              <div class="section-head">
+                <h3>Population Gate 8</h3>
+                <button id="add-gate8">Add request</button>
+              </div>
+              <p class="section-copy">These are the items the pond can ask for before it grows from 7 fish to 8+ fish.</p>
+              <p class="hint">If you add more than one request here, the pond can choose any one of them. It does not ask for all of them at once.</p>
+              <div id="gate8Table" class="table"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="card outputs">
+          <div class="section-head">
+            <h2>Generated Files</h2>
+              <div class="stack">
+                <button id="refresh-output">Refresh previews</button>
+                <button id="download-manifest">manifest.json</button>
+                <button id="download-content">content.json</button>
+                <button id="download-config">config.json</button>
+                <button id="download-i18n">i18n/default.json</button>
+                <button id="download-current-fish-data">current fish data</button>
+                <button id="download-atlas-output">atlas PNG</button>
+                <button id="download-aquarium-atlas-output">aquarium atlas PNG</button>
+              </div>
+            </div>
+            <div class="output-grid">
+              <label>manifest.json<textarea id="manifestPreview" readonly rows="12"></textarea></label>
+              <label>config.json<textarea id="configPreview" readonly rows="12"></textarea></label>
+              <label class="wide">content.json<textarea id="contentPreview" readonly rows="18"></textarea></label>
+              <label class="wide">current fish data file<textarea id="dataPreview" readonly rows="18"></textarea></label>
+              <label class="wide">i18n/default.json<textarea id="i18nPreview" readonly rows="12"></textarea></label>
+              <label class="wide">validation<textarea id="validationPreview" readonly rows="12"></textarea></label>
+            </div>
+          </section>
+      </main>
+    </div>
+  </div>
+
+  <template id="location-row-template">
+    <div class="row location-row">
+      <input data-field="location" type="text" list="location-suggestions" placeholder="Location">
+      <input data-field="chance" type="number" step="0.01" placeholder="Chance">
+      <input data-field="minDistanceFromShore" type="number" placeholder="Min shore">
+      <input data-field="maxDistanceFromShore" type="number" placeholder="Max shore">
+      <input data-field="precedence" type="number" placeholder="Precedence">
+      <button data-action="remove" class="danger">Remove</button>
+    </div>
+  </template>
+
+  <template id="product-row-template">
+    <article class="product-card">
+      <div class="product-card-head">
+        <strong>Produced item</strong>
+        <button data-action="remove" class="danger">Remove</button>
+      </div>
+      <div class="product-card-grid">
+        <label>Item
+          <select data-field="itemId"></select>
+          <small class="hint">Pick the actual vanilla item by name.</small>
+        </label>
+        <label>Required population
+          <input data-field="requiredPopulation" type="number" placeholder="0">
+          <small class="hint">Minimum fish count before this item can roll.</small>
+        </label>
+        <label>Chance
+          <input data-field="chance" type="number" step="0.01" placeholder="0.50">
+          <small class="hint">Chance from <code>0</code> to <code>1</code>.</small>
+        </label>
+        <label>Min quantity
+          <input data-field="minQuantity" type="number" placeholder="1">
+          <small class="hint">Minimum amount produced.</small>
+        </label>
+        <label>Max quantity
+          <input data-field="maxQuantity" type="number" placeholder="1">
+          <small class="hint">Maximum amount produced.</small>
+        </label>
+        <label>Export code
+          <div data-field="itemName" class="item-name"></div>
+          <small class="hint">The exact item query the pack will export.</small>
+        </label>
+      </div>
+    </article>
+  </template>
+
+  <template id="gate-row-template">
+    <article class="gate-card">
+      <div class="gate-card-head">
+        <strong>Pond request</strong>
+        <button data-action="remove" class="danger">Remove</button>
+      </div>
+      <div class="gate-card-grid">
+        <label>Item
+          <select data-field="itemId"></select>
+          <small class="hint">Pick the item by name instead of typing its code.</small>
+        </label>
+        <label>Quantity
+          <input data-field="quantity" type="number" min="1" placeholder="1">
+          <small class="hint">How many of that item the pond asks for.</small>
+        </label>
+        <label>Export code
+          <div data-field="exportCode" class="item-name"></div>
+          <small class="hint">The exact string that will be written to <code>content.json</code>.</small>
+        </label>
+      </div>
+    </article>
+  </template>
+
+  <datalist id="location-suggestions">
+    <option value="Beach"></option>
+    <option value="Mountain"></option>
+    <option value="Forest"></option>
+    <option value="Backwoods"></option>
+    <option value="Town"></option>
+    <option value="Railroad"></option>
+    <option value="Desert"></option>
+    <option value="IslandSouth"></option>
+    <option value="IslandWest"></option>
+    <option value="IslandNorth"></option>
+    <option value="Sewer"></option>
+    <option value="Mine"></option>
+  </datalist>
+
+  <script src="vanilla-objects.js"></script>
+  <script src="app.js"></script>
+  </body>
+  </html>
