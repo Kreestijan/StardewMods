@@ -1,7 +1,7 @@
 {
   "EnableMod": true,
   "EnableNudge": true,
-  "NudgeStrengthPixels": 24,
-  "NudgeDurationMs": 180,
-  "NudgeCooldownMs": 300
+  "NudgeStrengthPixels": 8,
+  "NudgeDurationMs": 1000,
+  "NudgeCooldownMs": 2000
 }
