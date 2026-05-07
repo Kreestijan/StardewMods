@@ -24,6 +24,9 @@ public sealed class TimelinePanel : EditorPanel
     private const int BlockGap = 10;
     private const int AddButtonWidth = 112;
     private const int MenuRowHeight = 40;
+    private const int HorizontalPadding = 20;
+    private const int ScrollStep = 180;
+    private const int AutoScrollEdgePadding = 48;
     private readonly EditorState state;
     private readonly List<(Rectangle Bounds, int CommandIndex)> commandBlocks = new();
     private readonly List<(Rectangle Bounds, CommandType Type)> addMenuRows = new();
@@ -38,6 +41,8 @@ public sealed class TimelinePanel : EditorPanel
     private Point dragOffset;
     private Point dragPosition;
     private bool hasDragged;
+    private int scrollOffsetX;
+    private int contentWidth;
 
     public TimelinePanel(EditorState state)
         : base("Timeline")
@@ -52,7 +57,8 @@ public sealed class TimelinePanel : EditorPanel
         base.Draw(spriteBatch);
         this.RebuildBlockBounds();
 
-        this.DrawBlock(spriteBatch, this.setupBlockBounds, "Setup", this.state.SelectedCommandIndex == -1);
+        Rectangle visibleBounds = this.GetTimelineContentBounds();
+        this.DrawBlockIfVisible(spriteBatch, visibleBounds, this.setupBlockBounds, "Setup", this.state.SelectedCommandIndex == -1);
         foreach ((Rectangle bounds, int commandIndex) in this.commandBlocks)
         {
             object command = this.state.Cutscene.Commands[commandIndex];
@@ -68,24 +74,27 @@ public sealed class TimelinePanel : EditorPanel
                 _ => "Unknown"
             };
 
-            this.DrawBlock(spriteBatch, bounds, label, this.state.SelectedCommandIndex == commandIndex);
+            this.DrawBlockIfVisible(spriteBatch, visibleBounds, bounds, label, this.state.SelectedCommandIndex == commandIndex);
         }
 
-        IClickableMenu.drawTextureBox(
-            spriteBatch,
-            this.addButtonBounds.X,
-            this.addButtonBounds.Y,
-            this.addButtonBounds.Width,
-            this.addButtonBounds.Height,
-            Color.White
-        );
-        Utility.drawTextWithShadow(
-            spriteBatch,
-            "+ Add",
-            Game1.smallFont,
-            new Vector2(this.addButtonBounds.X + 24, this.addButtonBounds.Y + 14),
-            Game1.textColor
-        );
+        if (this.addButtonBounds.Intersects(visibleBounds))
+        {
+            IClickableMenu.drawTextureBox(
+                spriteBatch,
+                this.addButtonBounds.X,
+                this.addButtonBounds.Y,
+                this.addButtonBounds.Width,
+                this.addButtonBounds.Height,
+                Color.White
+            );
+            Utility.drawTextWithShadow(
+                spriteBatch,
+                "+ Add",
+                Game1.smallFont,
+                new Vector2(this.addButtonBounds.X + 24, this.addButtonBounds.Y + 14),
+                Game1.textColor
+            );
+        }
 
         if (this.addMenuOpen)
         {
@@ -102,6 +111,8 @@ public sealed class TimelinePanel : EditorPanel
             this.DrawDropMarker(spriteBatch);
             this.DrawDraggedBlock(spriteBatch);
         }
+
+        this.DrawScrollHint(spriteBatch, visibleBounds);
     }
 
     public override void ReceiveLeftClick(int x, int y)
@@ -151,6 +162,7 @@ public sealed class TimelinePanel : EditorPanel
             return;
         }
 
+        this.AutoScrollWhileDragging(x);
         this.dragPosition = new Point(x, y);
         Rectangle draggedBounds = this.GetDraggedBounds();
         if (Math.Abs(draggedBounds.X - this.GetCommandBounds(this.draggedCommandIndex.Value).X) > 4
@@ -200,6 +212,19 @@ public sealed class TimelinePanel : EditorPanel
         this.contextCommandIndex = null;
     }
 
+    public override void ReceiveScrollWheelAction(int direction)
+    {
+        this.RebuildBlockBounds();
+        if (this.GetMaxScrollOffset() <= 0)
+        {
+            return;
+        }
+
+        int delta = direction > 0 ? -ScrollStep : ScrollStep;
+        this.SetScrollOffset(this.scrollOffsetX + delta);
+        this.CloseTransientMenus();
+    }
+
     public bool WantsClick(int x, int y)
     {
         this.RebuildBlockBounds();
@@ -216,6 +241,7 @@ public sealed class TimelinePanel : EditorPanel
         this.state.SelectedCommandIndex = insertIndex;
         this.state.IsDirty = true;
         this.CloseTransientMenus();
+        this.ScrollCommandIntoView(insertIndex);
     }
 
     private static TimelineCommand CreateDefaultCommand(CommandType commandType)
@@ -270,7 +296,10 @@ public sealed class TimelinePanel : EditorPanel
     {
         this.commandBlocks.Clear();
 
-        int x = this.Bounds.X + 20;
+        this.contentWidth = this.CalculateContentWidth();
+        this.SetScrollOffset(this.scrollOffsetX);
+
+        int x = this.Bounds.X + HorizontalPadding - this.scrollOffsetX;
         int y = this.Bounds.Y + 58;
         this.setupBlockBounds = new Rectangle(x, y, BlockWidth, BlockHeight);
         x += BlockWidth + BlockGap;
@@ -282,6 +311,14 @@ public sealed class TimelinePanel : EditorPanel
         }
 
         this.addButtonBounds = new Rectangle(x, y, AddButtonWidth, BlockHeight);
+    }
+
+    private int CalculateContentWidth()
+    {
+        int commandCount = this.state.Cutscene.Commands.Count;
+        return BlockWidth + BlockGap
+            + commandCount * (BlockWidth + BlockGap)
+            + AddButtonWidth;
     }
 
     private void DrawBlock(SpriteBatch spriteBatch, Rectangle bounds, string label, bool selected)
@@ -303,6 +340,42 @@ public sealed class TimelinePanel : EditorPanel
             new Vector2(bounds.Center.X - labelSize.X / 2f, bounds.Center.Y - labelSize.Y / 2f),
             Game1.textColor
         );
+    }
+
+    private void DrawBlockIfVisible(SpriteBatch spriteBatch, Rectangle visibleBounds, Rectangle bounds, string label, bool selected)
+    {
+        if (bounds.Intersects(visibleBounds))
+        {
+            this.DrawBlock(spriteBatch, bounds, label, selected);
+        }
+    }
+
+    private void DrawScrollHint(SpriteBatch spriteBatch, Rectangle visibleBounds)
+    {
+        int maxScroll = this.GetMaxScrollOffset();
+        if (maxScroll <= 0)
+        {
+            return;
+        }
+
+        if (this.scrollOffsetX > 0)
+        {
+            Utility.drawTextWithShadow(spriteBatch, "<", Game1.smallFont, new Vector2(visibleBounds.X - 2, visibleBounds.Y + 16), Color.DarkGoldenrod);
+        }
+
+        if (this.scrollOffsetX < maxScroll)
+        {
+            Utility.drawTextWithShadow(spriteBatch, ">", Game1.smallFont, new Vector2(visibleBounds.Right - 18, visibleBounds.Y + 16), Color.DarkGoldenrod);
+        }
+
+        int trackWidth = Math.Max(1, visibleBounds.Width - 28);
+        Rectangle track = new(visibleBounds.X + 14, visibleBounds.Bottom - 10, trackWidth, 4);
+        spriteBatch.Draw(Game1.staminaRect, track, Color.SaddleBrown * 0.35f);
+
+        int thumbWidth = Math.Max(24, track.Width * visibleBounds.Width / Math.Max(visibleBounds.Width, this.contentWidth));
+        int thumbTravel = Math.Max(1, track.Width - thumbWidth);
+        int thumbX = track.X + (int)Math.Round(thumbTravel * (this.scrollOffsetX / (float)maxScroll));
+        spriteBatch.Draw(Game1.staminaRect, new Rectangle(thumbX, track.Y, thumbWidth, track.Height), Color.DarkOrange * 0.9f);
     }
 
     private void DrawAddMenu(SpriteBatch spriteBatch)
@@ -428,6 +501,7 @@ public sealed class TimelinePanel : EditorPanel
         TimelineCommand clone = new()
         {
             Type = command.Type,
+            ActorSlotId = command.ActorSlotId,
             ActorName = command.ActorName,
             TileX = command.TileX,
             TileY = command.TileY,
@@ -447,6 +521,7 @@ public sealed class TimelinePanel : EditorPanel
         this.state.SelectedCommandIndex = commandIndex + 1;
         this.state.IsDirty = true;
         this.CloseTransientMenus();
+        this.ScrollCommandIntoView(commandIndex + 1);
     }
 
     private void StartDrag(int commandIndex, Rectangle bounds, int x, int y)
@@ -484,6 +559,7 @@ public sealed class TimelinePanel : EditorPanel
         this.state.SelectedCommandIndex = targetIndex;
         this.state.IsDirty = true;
         this.RebuildBlockBounds();
+        this.ScrollCommandIntoView(targetIndex);
     }
 
     private int GetDropTargetIndex(int mouseX)
@@ -608,5 +684,60 @@ public sealed class TimelinePanel : EditorPanel
         this.contextCommandIndex = null;
         this.deleteButtonBounds = null;
         this.duplicateButtonBounds = null;
+    }
+
+    private Rectangle GetTimelineContentBounds()
+    {
+        return new Rectangle(
+            this.Bounds.X + HorizontalPadding,
+            this.Bounds.Y + 50,
+            Math.Max(1, this.Bounds.Width - HorizontalPadding * 2),
+            BlockHeight + 22
+        );
+    }
+
+    private int GetMaxScrollOffset()
+    {
+        return Math.Max(0, this.contentWidth - this.GetTimelineContentBounds().Width);
+    }
+
+    private void SetScrollOffset(int value)
+    {
+        this.scrollOffsetX = Math.Clamp(value, 0, this.GetMaxScrollOffset());
+    }
+
+    private void ScrollCommandIntoView(int commandIndex)
+    {
+        if (commandIndex < 0)
+        {
+            this.SetScrollOffset(0);
+            return;
+        }
+
+        Rectangle visibleBounds = this.GetTimelineContentBounds();
+        int commandLeft = this.Bounds.X + HorizontalPadding + BlockWidth + BlockGap + commandIndex * (BlockWidth + BlockGap);
+        int commandRight = commandLeft + BlockWidth;
+
+        if (commandLeft - this.scrollOffsetX < visibleBounds.Left)
+        {
+            this.SetScrollOffset(commandLeft - visibleBounds.Left);
+        }
+        else if (commandRight - this.scrollOffsetX > visibleBounds.Right)
+        {
+            this.SetScrollOffset(commandRight - visibleBounds.Right);
+        }
+    }
+
+    private void AutoScrollWhileDragging(int mouseX)
+    {
+        Rectangle visibleBounds = this.GetTimelineContentBounds();
+        if (mouseX < visibleBounds.Left + AutoScrollEdgePadding)
+        {
+            this.SetScrollOffset(this.scrollOffsetX - ScrollStep / 3);
+        }
+        else if (mouseX > visibleBounds.Right - AutoScrollEdgePadding)
+        {
+            this.SetScrollOffset(this.scrollOffsetX + ScrollStep / 3);
+        }
     }
 }

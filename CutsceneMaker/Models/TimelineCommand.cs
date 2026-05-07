@@ -27,6 +27,8 @@ public sealed class TimelineCommand
 {
     public CommandType Type { get; set; }
 
+    public string? ActorSlotId { get; set; }
+
     public string? ActorName { get; set; }
 
     public int? TileX { get; set; }

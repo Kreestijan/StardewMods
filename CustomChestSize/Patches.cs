@@ -51,17 +51,17 @@ internal static class Patches
     [HarmonyPatch(typeof(Chest), nameof(Chest.GetActualCapacity))]
     private static void Chest_GetActualCapacity_Postfix(Chest __instance, ref int __result)
     {
+        if (suppressCustomCapacityDepth > 0)
+        {
+            return;
+        }
+
         // Auto-grabbers store items in a vanilla internal Chest, but Unlimited Storage
         // doesn't manage that internal chest. Handle it before the general yield path
         // so auto-grabber capacity stays tied to our configured layout.
         if (ModEntry.TryGetAutoGrabberLayout(__instance, out ChestGridLayout autoGrabberLayout))
         {
             __result = autoGrabberLayout.Capacity;
-            return;
-        }
-
-        if (suppressCustomCapacityDepth > 0)
-        {
             return;
         }
 

@@ -13,6 +13,7 @@ internal sealed class TitleMenuButtonController
     private const int ButtonWidth = 260;
     private const int ButtonHeight = 64;
     private const int ScreenPadding = 32;
+    private const int ButtonVerticalOffset = 200;
     private readonly IModHelper helper;
     private Rectangle buttonBounds;
 
@@ -82,7 +83,7 @@ internal sealed class TitleMenuButtonController
     private void RecalculateBounds()
     {
         int x = Game1.uiViewport.Width - ButtonWidth - ScreenPadding;
-        int y = Game1.uiViewport.Height - ButtonHeight - ScreenPadding;
+        int y = Game1.uiViewport.Height - ButtonHeight - ScreenPadding - ButtonVerticalOffset;
         this.buttonBounds = new Rectangle(Math.Max(ScreenPadding, x), Math.Max(ScreenPadding, y), ButtonWidth, ButtonHeight);
     }
 }

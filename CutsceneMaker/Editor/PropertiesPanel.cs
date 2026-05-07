@@ -91,11 +91,12 @@ public sealed class PropertiesPanel : EditorPanel
     private void DrawTimelineCommand(SpriteBatch spriteBatch, TimelineCommand command, int x, int y)
     {
         this.DrawLine(spriteBatch, command.Type.ToString(), x, y);
+        this.EnsureActorSlotLink(command);
 
         switch (command.Type)
         {
             case CommandType.Move:
-                this.DrawLine(spriteBatch, $"Actor: {command.ActorName ?? "farmer"}", x, y + RowHeight);
+                this.DrawLine(spriteBatch, $"Actor: {this.ResolveCommandActorName(command)}", x, y + RowHeight);
                 this.DrawLine(spriteBatch, "Tile X", x, y + RowHeight * 2);
                 this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "move.tileX"), new Rectangle(x + 90, y + RowHeight * 2 - 8, 78, 40), () => command.TileX ?? 0, value => command.TileX = value);
                 this.DrawLine(spriteBatch, "Y", x + 180, y + RowHeight * 2);
@@ -106,7 +107,7 @@ public sealed class PropertiesPanel : EditorPanel
                 break;
 
             case CommandType.Speak:
-                this.DrawLine(spriteBatch, $"Actor: {command.ActorName ?? "farmer"}", x, y + RowHeight);
+                this.DrawLine(spriteBatch, $"Actor: {this.ResolveCommandActorName(command)}", x, y + RowHeight);
                 this.DrawLine(spriteBatch, "Dialogue", x, y + RowHeight * 2);
                 this.DrawStringField(spriteBatch, CommandFieldKey(command, "speak.dialogue"), new Rectangle(x, y + RowHeight * 3, Math.Max(160, this.Bounds.Width - 48), 44), () => command.DialogueText ?? string.Empty, value => command.DialogueText = value, textLimit: 220);
                 this.DrawButton(spriteBatch, new Rectangle(x, y + RowHeight * 5, 120, ButtonHeight), "Actor", () => this.CycleActor(command, 1), () => this.CycleActor(command, -1));
@@ -129,7 +130,7 @@ public sealed class PropertiesPanel : EditorPanel
                 break;
 
             case CommandType.Emote:
-                this.DrawLine(spriteBatch, $"Actor: {command.ActorName ?? "farmer"}", x, y + RowHeight);
+                this.DrawLine(spriteBatch, $"Actor: {this.ResolveCommandActorName(command)}", x, y + RowHeight);
                 this.DrawLine(spriteBatch, $"Emote: {GetEmoteName(command.EmoteId ?? 8)}", x, y + RowHeight * 2);
                 this.DrawLine(spriteBatch, "ID", x, y + RowHeight * 3);
                 this.DrawIntegerField(spriteBatch, CommandFieldKey(command, "emote.id"), new Rectangle(x + 48, y + RowHeight * 3 - 8, 88, 40), () => command.EmoteId ?? 8, value => command.EmoteId = Math.Max(0, value));
@@ -338,10 +339,12 @@ public sealed class PropertiesPanel : EditorPanel
 
     private void CycleActor(TimelineCommand command, int direction)
     {
-        List<string> actors = new() { "farmer" };
-        actors.AddRange(this.state.Cutscene.Actors.Select(actor => actor.ActorName).Where(name => !string.IsNullOrWhiteSpace(name)));
-        int currentIndex = Math.Max(0, actors.FindIndex(actor => string.Equals(actor, command.ActorName, StringComparison.OrdinalIgnoreCase)));
-        command.ActorName = actors[WrapIndex(currentIndex + Math.Sign(direction), actors.Count)];
+        List<NpcPlacement> actors = new() { this.state.Cutscene.FarmerPlacement };
+        actors.AddRange(this.state.Cutscene.Actors.Where(actor => !string.IsNullOrWhiteSpace(actor.ActorName)));
+        int currentIndex = Math.Max(0, actors.FindIndex(actor => string.Equals(actor.ActorSlotId, command.ActorSlotId, StringComparison.Ordinal)));
+        NpcPlacement selectedActor = actors[WrapIndex(currentIndex + Math.Sign(direction), actors.Count)];
+        command.ActorSlotId = selectedActor.ActorSlotId;
+        command.ActorName = selectedActor.ActorName;
         this.state.IsDirty = true;
     }
 
@@ -369,6 +372,7 @@ public sealed class PropertiesPanel : EditorPanel
 
     private void CycleSetupActor(NpcPlacement actor, int direction)
     {
+        this.BackfillActorSlotLinks();
         ModEntry.Instance.RefreshKnownNpcs();
         if (ModEntry.KnownNpcNames.Count == 0)
         {
@@ -376,17 +380,14 @@ public sealed class PropertiesPanel : EditorPanel
         }
 
         int currentIndex = Math.Max(0, ModEntry.KnownNpcNames.FindIndex(name => string.Equals(name, actor.ActorName, StringComparison.OrdinalIgnoreCase)));
-        string oldName = actor.ActorName;
         actor.ActorName = ModEntry.KnownNpcNames[WrapIndex(currentIndex + Math.Sign(direction), ModEntry.KnownNpcNames.Count)];
-        this.RenameTimelineActorReferences(oldName, actor.ActorName);
+        this.RenameTimelineActorReferences(actor);
         this.state.IsDirty = true;
     }
 
-    private void RenameTimelineActorReferences(string oldName, string newName)
+    private void RenameTimelineActorReferences(NpcPlacement actor)
     {
-        if (string.IsNullOrWhiteSpace(oldName)
-            || string.IsNullOrWhiteSpace(newName)
-            || oldName.Equals(newName, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(actor.ActorSlotId) || string.IsNullOrWhiteSpace(actor.ActorName))
         {
             return;
         }
@@ -394,11 +395,78 @@ public sealed class PropertiesPanel : EditorPanel
         foreach (object command in this.state.Cutscene.Commands)
         {
             if (command is TimelineCommand timelineCommand
-                && timelineCommand.ActorName?.Equals(oldName, StringComparison.OrdinalIgnoreCase) == true)
+                && timelineCommand.ActorSlotId?.Equals(actor.ActorSlotId, StringComparison.Ordinal) == true)
             {
-                timelineCommand.ActorName = newName;
+                timelineCommand.ActorName = actor.ActorName;
             }
         }
+    }
+
+    private void BackfillActorSlotLinks()
+    {
+        foreach (object command in this.state.Cutscene.Commands)
+        {
+            if (command is TimelineCommand timelineCommand)
+            {
+                this.EnsureActorSlotLink(timelineCommand);
+            }
+        }
+    }
+
+    private void EnsureActorSlotLink(TimelineCommand command)
+    {
+        if (!CommandUsesActor(command.Type))
+        {
+            return;
+        }
+
+        NpcPlacement? actor = this.ResolveCommandActor(command);
+        if (actor is null)
+        {
+            return;
+        }
+
+        command.ActorSlotId = actor.ActorSlotId;
+        command.ActorName = actor.ActorName;
+    }
+
+    private NpcPlacement? ResolveCommandActor(TimelineCommand command)
+    {
+        if (!string.IsNullOrWhiteSpace(command.ActorSlotId))
+        {
+            NpcPlacement? actorBySlot = this.GetAllActors()
+                .FirstOrDefault(actor => actor.ActorSlotId.Equals(command.ActorSlotId, StringComparison.Ordinal));
+            if (actorBySlot is not null)
+            {
+                return actorBySlot;
+            }
+        }
+
+        string actorName = string.IsNullOrWhiteSpace(command.ActorName) ? "farmer" : command.ActorName!;
+        List<NpcPlacement> nameMatches = this.GetAllActors()
+            .Where(actor => actor.ActorName.Equals(actorName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return nameMatches.Count == 1 ? nameMatches[0] : null;
+    }
+
+    private string ResolveCommandActorName(TimelineCommand command)
+    {
+        return this.ResolveCommandActor(command)?.ActorName
+            ?? (string.IsNullOrWhiteSpace(command.ActorName) ? "farmer" : command.ActorName!);
+    }
+
+    private IEnumerable<NpcPlacement> GetAllActors()
+    {
+        yield return this.state.Cutscene.FarmerPlacement;
+        foreach (NpcPlacement actor in this.state.Cutscene.Actors)
+        {
+            yield return actor;
+        }
+    }
+
+    private static bool CommandUsesActor(CommandType commandType)
+    {
+        return commandType is CommandType.Move or CommandType.Speak or CommandType.Emote;
     }
 
     private void CyclePlacementFacing(NpcPlacement placement, int direction)

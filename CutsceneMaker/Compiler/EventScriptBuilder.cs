@@ -11,7 +11,7 @@ public static class EventScriptBuilder
         List<string> parts = new()
         {
             RequireValue(cutscene.MusicTrack, nameof(cutscene.MusicTrack)),
-            $"{cutscene.ViewportStartX} {cutscene.ViewportStartY}",
+            CompileInitialViewport(cutscene),
             CompilePlacementHeader(cutscene)
         };
 
@@ -29,7 +29,7 @@ public static class EventScriptBuilder
                     break;
 
                 case TimelineCommand timelineCommand:
-                    parts.AddRange(CompileCommand(timelineCommand, actorPositions));
+                    parts.AddRange(CompileCommand(cutscene, timelineCommand, actorPositions));
                     break;
 
                 case RawCommandBlock rawCommand:
@@ -60,6 +60,16 @@ public static class EventScriptBuilder
         return string.Join(" ", placements);
     }
 
+    private static string CompileInitialViewport(CutsceneData cutscene)
+    {
+        if (cutscene.ViewportStartX >= 0 && cutscene.ViewportStartY >= 0)
+        {
+            return $"{cutscene.ViewportStartX} {cutscene.ViewportStartY}";
+        }
+
+        return $"{cutscene.FarmerPlacement.TileX} {cutscene.FarmerPlacement.TileY}";
+    }
+
     private static string CompilePlacement(NpcPlacement placement)
     {
         return $"{RequireValue(placement.ActorName, nameof(placement.ActorName))} {placement.TileX} {placement.TileY} {placement.Facing}";
@@ -83,18 +93,18 @@ public static class EventScriptBuilder
         return actorPositions;
     }
 
-    private static IEnumerable<string> CompileCommand(TimelineCommand command, Dictionary<string, (int X, int Y)> actorPositions)
+    private static IEnumerable<string> CompileCommand(CutsceneData cutscene, TimelineCommand command, Dictionary<string, (int X, int Y)> actorPositions)
     {
         switch (command.Type)
         {
             case CommandType.Move:
-                return CompileMove(command, actorPositions);
+                return CompileMove(cutscene, command, actorPositions);
 
             case CommandType.Speak:
-                return SingleCommand(CompileSpeak(command));
+                return SingleCommand(CompileSpeak(cutscene, command));
 
             case CommandType.Emote:
-                return SingleCommand($"emote {RequireValue(command.ActorName, nameof(command.ActorName))} {RequireInt(command.EmoteId, nameof(command.EmoteId))} true");
+                return SingleCommand($"emote {ResolveActorName(cutscene, command)} {RequireInt(command.EmoteId, nameof(command.EmoteId))} true");
 
             case CommandType.Pause:
                 return SingleCommand($"precisePause {RequireInt(command.DurationMs, nameof(command.DurationMs))}");
@@ -116,18 +126,18 @@ public static class EventScriptBuilder
         }
     }
 
-    private static string CompileSpeak(TimelineCommand command)
+    private static string CompileSpeak(CutsceneData cutscene, TimelineCommand command)
     {
-        string actorName = RequireValue(command.ActorName, nameof(command.ActorName));
+        string actorName = ResolveActorName(cutscene, command);
         string dialogue = EscapeDialogue(RequireValue(command.DialogueText, nameof(command.DialogueText)));
         return actorName.Equals("farmer", StringComparison.OrdinalIgnoreCase)
             ? $"message \"{dialogue}\""
             : $"speak {actorName} \"{dialogue}\"";
     }
 
-    private static IEnumerable<string> CompileMove(TimelineCommand command, Dictionary<string, (int X, int Y)> actorPositions)
+    private static IEnumerable<string> CompileMove(CutsceneData cutscene, TimelineCommand command, Dictionary<string, (int X, int Y)> actorPositions)
     {
-        string actorName = RequireValue(command.ActorName, nameof(command.ActorName));
+        string actorName = ResolveActorName(cutscene, command);
         int targetX = RequireInt(command.TileX, nameof(command.TileX));
         int targetY = RequireInt(command.TileY, nameof(command.TileY));
         int facing = RequireInt(command.Facing, nameof(command.Facing));
@@ -214,5 +224,25 @@ public static class EventScriptBuilder
     private static int RequireInt(int? value, string fieldName)
     {
         return value ?? throw new InvalidOperationException($"{fieldName} is required.");
+    }
+
+    private static string ResolveActorName(CutsceneData cutscene, TimelineCommand command)
+    {
+        if (!string.IsNullOrWhiteSpace(command.ActorSlotId))
+        {
+            if (cutscene.FarmerPlacement.ActorSlotId.Equals(command.ActorSlotId, StringComparison.Ordinal))
+            {
+                return "farmer";
+            }
+
+            NpcPlacement? actor = cutscene.Actors.FirstOrDefault(actor =>
+                actor.ActorSlotId.Equals(command.ActorSlotId, StringComparison.Ordinal));
+            if (actor is not null)
+            {
+                return RequireValue(actor.ActorName, nameof(actor.ActorName));
+            }
+        }
+
+        return RequireValue(command.ActorName, nameof(command.ActorName));
     }
 }

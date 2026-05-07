@@ -21,6 +21,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private const int LocationDropdownRowHeight = 34;
     private const int LocationDropdownMaxRows = 10;
     private const int LocationSearchHeight = 42;
+    private const float PreviewFadeDurationMs = 500f;
     // Public SMAPI/game APIs don't expose a writable Game1.player at the title screen.
     // Play preview needs a temporary farmer because Event initialization reads Game1.player.
     private static readonly PropertyInfo? GamePlayerProperty = typeof(Game1).GetProperty("player", BindingFlags.Public | BindingFlags.Static);
@@ -316,6 +317,12 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         if (this.mapViewPanel.Bounds.Contains(mouseX, mouseY))
         {
             this.mapViewPanel.ReceiveScrollWheelAction(direction);
+            return;
+        }
+
+        if (this.timelinePanel.Bounds.Contains(mouseX, mouseY))
+        {
+            this.timelinePanel.ReceiveScrollWheelAction(direction);
             return;
         }
 
@@ -805,7 +812,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             this.RegisterPreviewEmotes(currentEvent, commandBeforeUpdate, commandBeforeUpdate + 1);
             currentEvent.Update(location, time);
             this.UpdatePreviewFarmerMovementAnimation(time);
-            this.UpdatePreviewGlobalFade(currentEvent);
+            this.UpdatePreviewGlobalFade(currentEvent, time);
             this.RegisterPreviewEmotes(currentEvent, commandBeforeUpdate, currentEvent.CurrentCommand);
             this.CapturePlaybackDialogue();
             if (!Game1.eventOver && currentEvent.CurrentCommand != commandBeforeUpdate)
@@ -898,32 +905,38 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
     }
 
-    private void UpdatePreviewGlobalFade(Event currentEvent)
+    private void UpdatePreviewGlobalFade(Event currentEvent, GameTime time)
     {
         if (!Game1.globalFade)
         {
             return;
         }
 
+        float elapsedMs = Math.Max(1f, (float)time.ElapsedGameTime.TotalMilliseconds);
+        float fadeStep = Math.Max(Game1.globalFadeSpeed, elapsedMs / PreviewFadeDurationMs);
         if (Game1.fadeIn)
         {
+            Game1.fadeToBlackAlpha = Math.Max(0f, Game1.fadeToBlackAlpha - fadeStep);
             if (Game1.fadeToBlackAlpha <= 0f)
             {
-                currentEvent.incrementCommandAfterFade();
+                this.FinishPreviewGlobalFade(currentEvent);
                 return;
             }
 
-            Game1.fadeToBlackAlpha = Math.Max(0f, Game1.fadeToBlackAlpha - Game1.globalFadeSpeed);
             return;
         }
 
+        Game1.fadeToBlackAlpha = Math.Min(1f, Game1.fadeToBlackAlpha + fadeStep);
         if (Game1.fadeToBlackAlpha >= 1f)
         {
-            currentEvent.incrementCommandAfterFade();
-            return;
+            this.FinishPreviewGlobalFade(currentEvent);
         }
+    }
 
-        Game1.fadeToBlackAlpha = Math.Min(1f, Game1.fadeToBlackAlpha + Game1.globalFadeSpeed);
+    private void FinishPreviewGlobalFade(Event currentEvent)
+    {
+        currentEvent.incrementCommandAfterFade();
+        Game1.globalFade = false;
     }
 
     private bool HasActivePlaybackEmote(Event currentEvent)

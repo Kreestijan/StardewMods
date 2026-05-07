@@ -2,6 +2,8 @@ namespace CutsceneMaker.Models;
 
 public sealed class NpcPlacement
 {
+    public string ActorSlotId { get; set; } = Guid.NewGuid().ToString("N");
+
     public string ActorName { get; set; } = string.Empty;
 
     public int TileX { get; set; }

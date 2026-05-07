@@ -11,7 +11,7 @@ public static class EventKeyBuilder
         string eventId = RequireValue(cutscene.UniqueId, nameof(cutscene.UniqueId));
         if (cutscene.Triggers.Count == 0)
         {
-            return eventId;
+            return eventId + "/";
         }
 
         List<string> parts = new() { eventId };
