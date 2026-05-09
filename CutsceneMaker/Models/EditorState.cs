@@ -40,4 +40,7 @@ public sealed class EditorState
 
     [JsonIgnore]
     public string LastSavedContentJsonPath { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string SelectedLocationId { get; set; } = "Town";
 }

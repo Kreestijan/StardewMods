@@ -31,7 +31,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private readonly TimelinePanel timelinePanel;
     private readonly PropertiesPanel propertiesPanel;
     private readonly List<(Rectangle Bounds, Action LeftClick, Action? RightClick)> toolbarButtons = new();
-    private readonly List<(Rectangle Bounds, string LocationName)> locationDropdownRows = new();
+    private readonly List<(Rectangle Bounds, LocationCatalogEntry Location)> locationDropdownRows = new();
     private readonly HashSet<int> registeredPreviewEmoteCommands = new();
     private PreconditionEditorPanel? preconditionEditorPanel;
     private SaveDialogPanel? saveDialogPanel;
@@ -452,7 +452,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private void ToggleLocationDropdown()
     {
         ModEntry.Instance.RefreshKnownLocations();
-        if (LocationBootstrapper.SupportedLocations.Count == 0)
+        if (LocationBootstrapper.SupportedLocationEntries.Count == 0)
         {
             this.toolbarStatusMessage = "No locations found.";
             return;
@@ -462,8 +462,8 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         if (this.locationDropdownOpen)
         {
             this.locationSearchText = string.Empty;
-            IReadOnlyList<string> filteredLocations = this.GetFilteredLocations();
-            int selectedIndex = FindLocationIndex(filteredLocations, this.state.Cutscene.LocationName);
+            IReadOnlyList<LocationCatalogEntry> filteredLocations = this.GetFilteredLocations();
+            int selectedIndex = FindLocationIndex(filteredLocations, this.state.SelectedLocationId, this.state.Cutscene.LocationName);
             this.locationDropdownScrollIndex = Math.Clamp(
                 selectedIndex < 0 ? 0 : selectedIndex - LocationDropdownMaxRows / 2,
                 0,
@@ -476,10 +476,10 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
     }
 
-    private void SetLocation(string nextLocation)
+    private void SetLocation(LocationCatalogEntry nextLocation)
     {
-        if (string.IsNullOrWhiteSpace(nextLocation)
-            || nextLocation.Equals(this.state.Cutscene.LocationName, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(nextLocation.Id)
+            || nextLocation.Id.Equals(this.state.SelectedLocationId, StringComparison.OrdinalIgnoreCase))
         {
             this.CloseLocationDropdown();
             return;
@@ -487,17 +487,22 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
         this.CloseLocationDropdown();
         this.StopPlayback();
-        this.state.Cutscene.LocationName = nextLocation;
-        LocationLoadResult loadResult = this.LoadPreviewLocation(nextLocation);
+        this.state.SelectedLocationId = nextLocation.Id;
+        this.state.Cutscene.LocationName = nextLocation.EventLocationName;
+        LocationLoadResult loadResult = this.LoadPreviewLocation(nextLocation.Id);
         this.state.IsDirty = true;
         this.toolbarStatusMessage = loadResult.Loaded
-            ? $"Location set to {nextLocation}."
-            : $"Location '{nextLocation}' preview failed: {this.TrimToolbarText(loadResult.FailureReason ?? "unknown reason", 70)}";
+            ? $"Location set to {nextLocation.DisplayName}."
+            : $"Location '{nextLocation.DisplayName}' preview failed: {this.TrimToolbarText(loadResult.FailureReason ?? "unknown reason", 70)}";
     }
 
-    private LocationLoadResult LoadPreviewLocation(string locationName)
+    private LocationLoadResult LoadPreviewLocation(string locationIdOrName)
     {
-        LocationLoadResult result = LocationBootstrapper.LoadDetailed(locationName);
+        LocationCatalogEntry entry = LocationBootstrapper.ResolveEntry(locationIdOrName);
+        this.state.SelectedLocationId = entry.Id;
+        this.state.Cutscene.LocationName = entry.EventLocationName;
+
+        LocationLoadResult result = LocationBootstrapper.LoadDetailed(entry.Id);
         this.state.BootstrappedMap = result.Location;
         this.state.MapLoadFailureMessage = result.Loaded
             ? string.Empty
@@ -512,11 +517,11 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             return false;
         }
 
-        foreach ((Rectangle bounds, string locationName) in this.locationDropdownRows)
+        foreach ((Rectangle bounds, LocationCatalogEntry location) in this.locationDropdownRows)
         {
             if (bounds.Contains(x, y))
             {
-                this.SetLocation(locationName);
+                this.SetLocation(location);
                 return true;
             }
         }
@@ -557,15 +562,15 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.locationDropdownScrollIndex = 0;
     }
 
-    private IReadOnlyList<string> GetFilteredLocations()
+    private IReadOnlyList<LocationCatalogEntry> GetFilteredLocations()
     {
         if (string.IsNullOrWhiteSpace(this.locationSearchText))
         {
-            return LocationBootstrapper.SupportedLocations;
+            return LocationBootstrapper.SupportedLocationEntries;
         }
 
-        return LocationBootstrapper.SupportedLocations
-            .Where(name => name.Contains(this.locationSearchText, StringComparison.OrdinalIgnoreCase))
+        return LocationBootstrapper.SupportedLocationEntries
+            .Where(entry => entry.SearchText.Contains(this.locationSearchText, StringComparison.OrdinalIgnoreCase))
             .ToList();
     }
 
@@ -579,7 +584,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
         if (key == Keys.Enter)
         {
-            IReadOnlyList<string> filteredLocations = this.GetFilteredLocations();
+            IReadOnlyList<LocationCatalogEntry> filteredLocations = this.GetFilteredLocations();
             if (filteredLocations.Count > 0)
             {
                 this.SetLocation(filteredLocations[Math.Clamp(this.locationDropdownScrollIndex, 0, filteredLocations.Count - 1)]);
@@ -617,11 +622,13 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         return true;
     }
 
-    private static int FindLocationIndex(IReadOnlyList<string> locations, string locationName)
+    private static int FindLocationIndex(IReadOnlyList<LocationCatalogEntry> locations, string selectedLocationId, string eventLocationName)
     {
         for (int index = 0; index < locations.Count; index++)
         {
-            if (locations[index].Equals(locationName, StringComparison.OrdinalIgnoreCase))
+            LocationCatalogEntry location = locations[index];
+            if (location.Id.Equals(selectedLocationId, StringComparison.OrdinalIgnoreCase)
+                || location.EventLocationName.Equals(eventLocationName, StringComparison.OrdinalIgnoreCase))
             {
                 return index;
             }
@@ -706,7 +713,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     {
         try
         {
-            GameLocation? location = this.state.BootstrappedMap ?? this.LoadPreviewLocation(this.state.Cutscene.LocationName).Location;
+            GameLocation? location = this.state.BootstrappedMap ?? this.LoadPreviewLocation(this.state.SelectedLocationId).Location;
             if (location is null)
             {
                 this.toolbarStatusMessage = $"Cannot play: {this.TrimToolbarText(this.state.MapLoadFailureMessage, 80)}";
@@ -1231,7 +1238,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         nextX += 84;
 
         this.locationButtonBounds = new Rectangle(nextX, buttonY, 250, 38);
-        this.DrawToolbarButton(spriteBatch, this.locationButtonBounds, "Location: " + this.TrimToolbarText(this.state.Cutscene.LocationName, 18), this.ToggleLocationDropdown);
+        this.DrawToolbarButton(spriteBatch, this.locationButtonBounds, "Location: " + this.TrimToolbarText(LocationBootstrapper.GetDisplayName(this.state.SelectedLocationId), 18), this.ToggleLocationDropdown);
         nextX += 262;
 
         this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 96, 38), this.state.Mode == EditorMode.Play ? "Stop" : "Play", this.TogglePlayback);
@@ -1272,8 +1279,8 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     {
         this.locationDropdownRows.Clear();
 
-        IReadOnlyList<string> locations = this.GetFilteredLocations();
-        if (LocationBootstrapper.SupportedLocations.Count == 0)
+        IReadOnlyList<LocationCatalogEntry> locations = this.GetFilteredLocations();
+        if (LocationBootstrapper.SupportedLocationEntries.Count == 0)
         {
             return;
         }
@@ -1321,7 +1328,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 break;
             }
 
-            string locationName = locations[locationIndex];
+            LocationCatalogEntry location = locations[locationIndex];
             Rectangle rowBounds = new(
                 dropdownBounds.X + 12,
                 dropdownBounds.Y + LocationSearchHeight + 12 + rowIndex * LocationDropdownRowHeight,
@@ -1329,19 +1336,19 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 LocationDropdownRowHeight
             );
 
-            if (locationName.Equals(this.state.Cutscene.LocationName, StringComparison.OrdinalIgnoreCase))
+            if (location.Id.Equals(this.state.SelectedLocationId, StringComparison.OrdinalIgnoreCase))
             {
                 spriteBatch.Draw(Game1.staminaRect, rowBounds, Color.LightGoldenrodYellow * 0.7f);
             }
 
             Utility.drawTextWithShadow(
                 spriteBatch,
-                this.TrimToolbarText(locationName, 28),
+                this.TrimToolbarText(location.DisplayName, 28),
                 Game1.smallFont,
                 new Vector2(rowBounds.X + 8, rowBounds.Y + 6),
                 Game1.textColor
             );
-            this.locationDropdownRows.Add((rowBounds, locationName));
+            this.locationDropdownRows.Add((rowBounds, location));
         }
 
         if (locations.Count > LocationDropdownMaxRows)
@@ -1360,7 +1367,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
     private Rectangle GetLocationDropdownBounds()
     {
-        IReadOnlyList<string> locations = this.GetFilteredLocations();
+        IReadOnlyList<LocationCatalogEntry> locations = this.GetFilteredLocations();
         int visibleRows = Math.Min(LocationDropdownMaxRows, Math.Max(1, locations.Count));
         int height = LocationSearchHeight + 24 + visibleRows * LocationDropdownRowHeight + (locations.Count > LocationDropdownMaxRows ? 28 : 0);
         return new Rectangle(this.locationButtonBounds.X, this.locationButtonBounds.Bottom + 4, 340, height);

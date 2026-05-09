@@ -22,6 +22,7 @@ public sealed class MapViewPanel : EditorPanel
     private bool loggedMapDrawFailure;
     private RenderTarget2D? mapRenderTarget;
     private NpcPlacement? draggedActor;
+    private GameLocation? lastDrawnLocation;
 
     public MapViewPanel(EditorState state)
         : base("Map View")
@@ -40,8 +41,16 @@ public sealed class MapViewPanel : EditorPanel
             string reason = string.IsNullOrWhiteSpace(this.state.MapLoadFailureMessage)
                 ? "No loader reason was recorded."
                 : this.state.MapLoadFailureMessage;
-            this.DrawWarning(spriteBatch, contentBounds, $"Could not preview this map: {TrimWarning(reason)}\nPlay mode disabled.");
+            this.DrawWarning(spriteBatch, contentBounds, $"{reason}\nPlay mode disabled.");
             return;
+        }
+
+        if (!ReferenceEquals(this.lastDrawnLocation, this.state.BootstrappedMap))
+        {
+            this.lastDrawnLocation = this.state.BootstrappedMap;
+            this.panPixels = Vector2.Zero;
+            this.isPanning = false;
+            this.draggedActor = null;
         }
 
         this.DrawMapToRenderTarget(spriteBatch, contentBounds);
@@ -174,7 +183,7 @@ public sealed class MapViewPanel : EditorPanel
                 ModEntry.Instance.Monitor.Log($"Cutscene Maker map draw failed: {ex}", LogLevel.Warn);
             }
 
-            this.DrawWarning(spriteBatch, contentBounds, $"{TrimWarning(this.state.MapLoadFailureMessage)}\nPlay mode disabled.");
+            this.DrawWarning(spriteBatch, contentBounds, $"{this.state.MapLoadFailureMessage}\nPlay mode disabled.");
         }
         finally
         {
@@ -562,11 +571,27 @@ public sealed class MapViewPanel : EditorPanel
 
         Utility.drawTextWithShadow(
             spriteBatch,
-            message,
+            "Could not preview this map:",
             Game1.smallFont,
             new Vector2(contentBounds.X + 24, contentBounds.Y + 24),
             Color.Red
         );
+
+        int textX = contentBounds.X + 24;
+        int textY = contentBounds.Y + 24 + Game1.smallFont.LineSpacing + 8;
+        int maxWidth = Math.Max(120, contentBounds.Width - 48);
+        int maxBottom = contentBounds.Bottom - 24;
+        foreach (string line in WrapText(message, maxWidth))
+        {
+            if (textY + Game1.smallFont.LineSpacing > maxBottom)
+            {
+                Utility.drawTextWithShadow(spriteBatch, "...", Game1.smallFont, new Vector2(textX, textY), Color.Red);
+                break;
+            }
+
+            Utility.drawTextWithShadow(spriteBatch, line, Game1.smallFont, new Vector2(textX, textY), Color.Red);
+            textY += Game1.smallFont.LineSpacing + 2;
+        }
     }
 
     private static string FormatException(Exception ex)
@@ -576,11 +601,32 @@ public sealed class MapViewPanel : EditorPanel
             : $"{ex.GetType().Name}: {ex.Message}";
     }
 
-    private static string TrimWarning(string text)
+    private static IEnumerable<string> WrapText(string text, int maxWidth)
     {
-        const int maxLength = 160;
-        return text.Length <= maxLength
-            ? text
-            : text[..(maxLength - 3)] + "...";
+        foreach (string paragraph in text.Split('\n'))
+        {
+            string line = string.Empty;
+            foreach (string word in paragraph.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string candidate = string.IsNullOrEmpty(line) ? word : line + " " + word;
+                if (Game1.smallFont.MeasureString(candidate).X <= maxWidth)
+                {
+                    line = candidate;
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(line))
+                {
+                    yield return line;
+                }
+
+                line = word;
+            }
+
+            if (!string.IsNullOrEmpty(line))
+            {
+                yield return line;
+            }
+        }
     }
 }
