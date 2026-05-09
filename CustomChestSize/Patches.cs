@@ -108,19 +108,43 @@ internal static class Patches
             typeof(bool)
         }
     )]
-    private static void ItemGrabMenu_Constructor_Prefix(int source, StardewValley.Item sourceItem, out bool __state)
+    private static void ItemGrabMenu_Constructor_Prefix(int source, StardewValley.Item sourceItem, object context, out bool __state)
     {
-        __state = source == ItemGrabMenu.source_chest && sourceItem is Chest;
+        __state = ShouldSuppressCustomCapacityDuringConstruction(source, sourceItem, context);
         if (__state)
         {
             suppressCustomCapacityDepth++;
 
             if (ModEntry.Instance.ShouldLogDebug())
             {
-                Chest chest = (Chest)sourceItem;
-                ModEntry.LogDebugStatic($"[ItemGrabMenu_Constructor_Prefix] sourceItem ItemId={sourceItem.ItemId} Name={sourceItem.Name} SpecialChestType={chest.SpecialChestType} playerChest={chest.playerChest.Value} source={source}");
+                ModEntry.LogDebugStatic($"[ItemGrabMenu_Constructor_Prefix] sourceItem={sourceItem.GetType().Name} ItemId={sourceItem.ItemId} Name={sourceItem.Name} context={context?.GetType().Name ?? "null"} source={source}");
             }
         }
+    }
+
+    private static bool ShouldSuppressCustomCapacityDuringConstruction(int source, StardewValley.Item sourceItem, object? context)
+    {
+        if (source != ItemGrabMenu.source_chest)
+        {
+            return false;
+        }
+
+        if (sourceItem is Chest || IsAutoGrabberReference(sourceItem))
+        {
+            return true;
+        }
+
+        return IsAutoGrabberReference(context);
+    }
+
+    private static bool IsAutoGrabberReference(object? value)
+    {
+        if (ModEntry.IsAutoGrabber(value))
+        {
+            return true;
+        }
+
+        return value is Chest chest && ModEntry.TryGetAutoGrabberLayout(chest, out _);
     }
 
     [HarmonyFinalizer]
