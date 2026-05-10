@@ -338,6 +338,11 @@ public static class EventScriptBuilder
 
     private static int RequireInt(string? value, string fieldName)
     {
+        if (value is not null && value.Contains("{{", StringComparison.Ordinal))
+        {
+            return 0; // CP token — placeholder, CP resolves at runtime
+        }
+
         if (!int.TryParse(value, out int result))
         {
             throw new InvalidOperationException($"{fieldName} must be an integer.");
@@ -370,6 +375,11 @@ public static class EventScriptBuilder
 
     private static string QuoteArgumentIfNeeded(string value)
     {
+        if (value.Contains("{{", StringComparison.Ordinal))
+        {
+            return value; // CP token — output verbatim, CP resolves at runtime
+        }
+
         if (value.Length == 0 || value.Any(character => char.IsWhiteSpace(character) || character == '/'))
         {
             return QuoteArgument(value);
@@ -380,6 +390,11 @@ public static class EventScriptBuilder
 
     private static string QuoteArgument(string value)
     {
+        if (value.Contains("{{", StringComparison.Ordinal))
+        {
+            return value; // CP token — output verbatim
+        }
+
         return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
     }
 }

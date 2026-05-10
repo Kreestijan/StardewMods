@@ -46,6 +46,14 @@ public sealed class CutsceneData
 
     public List<EventPreconditionBlock> Triggers { get; set; } = new();
 
+    /// <summary>True if this cutscene was imported with unresolved CP tokens that could not be expanded.</summary>
+    [JsonIgnore]
+    public bool HasUnresolvedTokens { get; set; }
+
+    /// <summary>The raw event key text when the key itself contains unresolved tokens.</summary>
+    [JsonIgnore]
+    public string? RawEventKey { get; set; }
+
     [JsonIgnore]
     public ImportedContentPackContext? ImportContext { get; set; }
 

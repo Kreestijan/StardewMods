@@ -115,6 +115,11 @@ public sealed class EventCommandDefinition
 
     private static string QuoteArgumentIfNeeded(string value)
     {
+        if (value.Contains("{{", StringComparison.Ordinal))
+        {
+            return value; // CP token — output verbatim
+        }
+
         if (value.Length == 0 || value.Any(character => char.IsWhiteSpace(character) || character == '/'))
         {
             return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";

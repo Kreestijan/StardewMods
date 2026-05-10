@@ -10,4 +10,7 @@ public sealed class ImportedContentPackContext
 
     [JsonIgnore]
     public Dictionary<string, PreviewMapOverride> PreviewMapOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Token names from DynamicTokens that the importer couldn't resolve.</summary>
+    public List<string> UnresolvedTokens { get; init; } = new();
 }

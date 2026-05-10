@@ -830,7 +830,9 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.state.RedoStack.Clear();
         this.LoadPreviewLocation(cutscene.LocationName);
         this.state.IsDirty = false;
-        this.toolbarStatusMessage = $"Imported {cutscene.UniqueId}.";
+        this.toolbarStatusMessage = cutscene.HasUnresolvedTokens
+            ? $"Imported {cutscene.UniqueId} (has unresolved CP tokens)."
+            : $"Imported {cutscene.UniqueId}.";
     }
 
     private void TogglePlayback()

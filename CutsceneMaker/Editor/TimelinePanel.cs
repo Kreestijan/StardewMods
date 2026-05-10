@@ -862,12 +862,16 @@ public sealed class TimelinePanel : EditorPanel
 
     private string GetEventCommandLabel(EventCommandBlock command)
     {
+        bool hasToken = command.Values.Values.Any(v => v.Contains("{{", StringComparison.Ordinal));
+
         if (this.commandCatalog.TryGetById(command.CommandId, out EventCommandDefinition? definition))
         {
-            return $"({definition.Badge}) {definition.DisplayName}";
+            string label = $"({definition.Badge}) {definition.DisplayName}";
+            return hasToken ? label + " [CP]" : label;
         }
 
-        return string.IsNullOrWhiteSpace(command.DisplayName) ? "Custom" : command.DisplayName;
+        string displayName = string.IsNullOrWhiteSpace(command.DisplayName) ? "Custom" : command.DisplayName;
+        return hasToken ? displayName + " [CP]" : displayName;
     }
 
     private int GetCommandBlockWidth(object command)

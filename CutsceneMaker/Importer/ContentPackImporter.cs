@@ -199,11 +199,6 @@ public static class ContentPackImporter
 
             foreach (JObject token in tokenArray.OfType<JObject>())
             {
-                if (!IsUngatedOrNewSavePatch(token["When"]))
-                {
-                    continue;
-                }
-
                 string? name = token.Value<string>("Name");
                 string? value = token.Value<string>("Value");
                 if (string.IsNullOrWhiteSpace(name) || value is null)
@@ -211,6 +206,9 @@ public static class ContentPackImporter
                     continue;
                 }
 
+                // Expand using current tokens dict (which includes values from previous entries
+                // for the same name). This handles self-referencing concatenation correctly:
+                // "{{TokenName}}extra" expands to the previous value + "extra".
                 this.tokens[name] = this.ExpandText(value, fieldTokens: null);
             }
         }
@@ -394,20 +392,42 @@ public static class ContentPackImporter
                     continue;
                 }
 
-                string expandedKey = this.ExpandText(entry.Name, fieldTokens: null);
+                string expandedKey = this.ExpandText(entry.Name ?? string.Empty, fieldTokens: null);
                 string expandedScript = this.ExpandText(entry.Value.Value<string>() ?? string.Empty, fieldTokens: null);
-                if (LooksTokenized(expandedKey) || LooksTokenized(expandedScript))
+
+                CutsceneData cutscene = CutsceneData.CreateBlank();
+                cutscene.LocationName = expandedLocationName;
+
+                bool keyHasTokens = LooksTokenized(expandedKey);
+                bool scriptHasTokens = LooksTokenized(expandedScript);
+
+                // Always parse the key — EventKeyParser.Parse handles {{...}} gracefully
+                (string uniqueId, List<EventPreconditionBlock> triggers) = EventKeyParser.Parse(expandedKey, ModEntry.Instance.PreconditionCatalog);
+                cutscene.UniqueId = uniqueId;
+                cutscene.CutsceneName = uniqueId;
+                cutscene.Triggers = triggers;
+
+                if (keyHasTokens)
                 {
-                    continue;
+                    // Key has unresolved tokens — store raw key for passthrough
+                    cutscene.RawEventKey = entry.Name;
+                    cutscene.HasUnresolvedTokens = true;
                 }
 
-                (string uniqueId, List<EventPreconditionBlock> triggers) = EventKeyParser.Parse(expandedKey, ModEntry.Instance.PreconditionCatalog);
-                CutsceneData cutscene = CutsceneData.CreateBlank();
-                cutscene.CutsceneName = uniqueId;
-                cutscene.UniqueId = uniqueId;
-                cutscene.LocationName = expandedLocationName;
-                cutscene.Triggers = triggers;
-                cutscene.Commands = EventScriptParser.Parse(expandedScript, cutscene, ModEntry.Instance.CommandCatalog);
+                // Phase G: Restructure if expanded token at entry [0] produced placements
+                // instead of a music track, e.g. {{Summoning_SetUp}} -> "farmer 26 55 2 Evelyn ..."
+                string adjustedScript = RestructureExpandedScript(expandedScript);
+
+                // Parse script — existing parser handles tokenized content gracefully:
+                // - Known verb + token args → EventCommandBlock with token in Values
+                // - Unknown verb / standalone token → RawCommandBlock with token text preserved
+                cutscene.Commands = EventScriptParser.Parse(adjustedScript, cutscene, ModEntry.Instance.CommandCatalog);
+
+                if (scriptHasTokens)
+                {
+                    cutscene.HasUnresolvedTokens = true;
+                }
+
                 cutscene.ImportContext = this.context;
                 this.Cutscenes.Add(cutscene);
             }
@@ -463,9 +483,17 @@ public static class ContentPackImporter
                 return fieldValue;
             }
 
-            return this.tokens.TryGetValue(bareName, out string? value)
-                ? value
-                : null;
+            if (this.tokens.TryGetValue(bareName, out string? value))
+            {
+                return value;
+            }
+
+            if (this.context is not null && !this.context.UnresolvedTokens.Contains(bareName))
+            {
+                this.context.UnresolvedTokens.Add(bareName);
+            }
+
+            return null;
         }
     }
 
@@ -558,7 +586,55 @@ public static class ContentPackImporter
 
     private static bool LooksTokenized(string value)
     {
-        return value.Contains("{{", StringComparison.Ordinal) || value.Contains('{', StringComparison.Ordinal);
+        return value.Contains("{{", StringComparison.Ordinal);
+    }
+
+    /// <summary>If entry [0] contains expanded placements instead of a music track, replace it
+    /// with a default music entry. This handles DynamicTokens like <c>{{Summoning_SetUp}}</c>
+    /// that resolve to a placement string at the script start.</summary>
+    private static string RestructureExpandedScript(string script)
+    {
+        List<string> parts = QuoteAwareSplit.Split(script, '/');
+        if (parts.Count == 0 || !LooksLikePlacementHeader(parts[0].Trim()))
+        {
+            return script;
+        }
+
+        parts[0] = "none";
+        return string.Join("/", parts);
+    }
+
+    /// <summary>True if the text looks like a placement header (e.g. <c>farmer 26 55 2 Evelyn 40 60 2</c>)
+    /// rather than a music track or viewport entry.</summary>
+    private static bool LooksLikePlacementHeader(string value)
+    {
+        string[] parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 4 || parts.Length % 4 != 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (i % 4 == 0)
+            {
+                // Actor name — should not parse as a number
+                if (int.TryParse(parts[i], out _))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                // Coordinate/facing — must parse as a number
+                if (!int.TryParse(parts[i], out _))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static bool IsMapFile(string filePath)

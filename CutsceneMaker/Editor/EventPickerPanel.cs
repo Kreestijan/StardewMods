@@ -40,6 +40,8 @@ public sealed class EventPickerPanel
     private int listScrollIndex;
     private int folderScrollIndex;
     private bool folderBrowserOpen;
+    private string searchText = string.Empty;
+    private BoundTextField? searchField;
 
     public EventPickerPanel(Action close, Action<CutsceneData> importCutscene, string initialPath)
     {
@@ -58,7 +60,7 @@ public sealed class EventPickerPanel
 
     public bool HasSelectedTextField()
     {
-        return this.pathField.Selected;
+        return this.pathField.Selected || (this.searchField?.Selected ?? false);
     }
 
     public void Draw(SpriteBatch spriteBatch)
@@ -90,22 +92,29 @@ public sealed class EventPickerPanel
 
         int listY = y + 188;
         int listWidth = bounds.Width - 56;
+        List<ImportCandidate> filtered = this.GetFilteredCutscenes();
         if (this.importedCutscenes.Count > 0)
         {
-            this.DrawLine(spriteBatch, "Select an event to import:", x, listY - 34, Game1.textColor);
+            this.DrawSearchField(spriteBatch, x, listY - 34, listWidth);
+
+            string countLabel = string.IsNullOrWhiteSpace(this.searchText)
+                ? $"{filtered.Count} events"
+                : $"{filtered.Count}/{this.importedCutscenes.Count} events";
+            this.DrawLine(spriteBatch, countLabel, x + listWidth - (int)Game1.smallFont.MeasureString(countLabel).X, listY - 34, Color.DimGray);
         }
 
+        this.selectedIndex = Math.Clamp(this.selectedIndex, -1, filtered.Count - 1);
         int visibleRows = this.GetVisibleRows(bounds, listY);
-        this.listScrollIndex = Math.Clamp(this.listScrollIndex, 0, Math.Max(0, this.importedCutscenes.Count - visibleRows));
+        this.listScrollIndex = Math.Clamp(this.listScrollIndex, 0, Math.Max(0, filtered.Count - visibleRows));
         for (int visibleIndex = 0; visibleIndex < visibleRows; visibleIndex++)
         {
             int eventIndex = this.listScrollIndex + visibleIndex;
-            if (eventIndex >= this.importedCutscenes.Count)
+            if (eventIndex >= filtered.Count)
             {
                 break;
             }
 
-            this.DrawEventRow(spriteBatch, eventIndex, new Rectangle(x, listY + visibleIndex * RowHeight, listWidth, RowHeight - 4));
+            this.DrawEventRow(spriteBatch, filtered, eventIndex, new Rectangle(x, listY + visibleIndex * RowHeight, listWidth, RowHeight - 4));
         }
 
         Rectangle openButton = new(bounds.Right - 216, bounds.Bottom - 56, 88, ButtonHeight);
@@ -122,6 +131,7 @@ public sealed class EventPickerPanel
     public void Update()
     {
         this.pathField.Update();
+        this.searchField?.Update();
     }
 
     public void ReceiveLeftClick(int x, int y)
@@ -132,6 +142,13 @@ public sealed class EventPickerPanel
             return;
         }
 
+        if (this.searchField is not null && this.searchField.Contains(x, y))
+        {
+            this.pathField.Selected = false;
+            this.searchField.Select();
+            return;
+        }
+
         foreach ((Rectangle bounds, Action click) in this.buttons)
         {
             if (bounds.Contains(x, y))
@@ -139,6 +156,11 @@ public sealed class EventPickerPanel
                 click();
                 return;
             }
+        }
+
+        if (this.searchField is not null)
+        {
+            this.searchField.Selected = false;
         }
 
         this.pathField.Selected = false;
@@ -159,6 +181,21 @@ public sealed class EventPickerPanel
         if (this.pathField.Selected)
         {
             this.pathField.ReceiveKeyPress(key);
+            return;
+        }
+
+        if (this.searchField is not null && this.searchField.Selected)
+        {
+            if (key == Keys.Escape)
+            {
+                this.searchField.Selected = false;
+                this.searchText = string.Empty;
+                this.selectedIndex = -1;
+                this.listScrollIndex = 0;
+                return;
+            }
+
+            this.searchField.ReceiveKeyPress(key);
             return;
         }
 
@@ -184,8 +221,9 @@ public sealed class EventPickerPanel
         Rectangle bounds = this.GetBounds();
         int listY = bounds.Y + 24 + 188;
         int visibleRows = this.GetVisibleRows(bounds, listY);
+        int filteredCount = this.GetFilteredCutscenes().Count;
         int delta = direction > 0 ? -WheelRows : WheelRows;
-        this.listScrollIndex = Math.Clamp(this.listScrollIndex + delta, 0, Math.Max(0, this.importedCutscenes.Count - visibleRows));
+        this.listScrollIndex = Math.Clamp(this.listScrollIndex + delta, 0, Math.Max(0, filteredCount - visibleRows));
     }
 
     private void LoadEvents()
@@ -194,6 +232,8 @@ public sealed class EventPickerPanel
         this.importedCutscenes.Clear();
         this.selectedIndex = -1;
         this.listScrollIndex = 0;
+        this.searchText = string.Empty;
+        this.searchField = null;
 
         if (string.IsNullOrWhiteSpace(this.contentJsonPath))
         {
@@ -263,19 +303,20 @@ public sealed class EventPickerPanel
 
     private void OpenSelected()
     {
-        if (this.selectedIndex < 0 || this.selectedIndex >= this.importedCutscenes.Count)
+        List<ImportCandidate> filtered = this.GetFilteredCutscenes();
+        if (this.selectedIndex < 0 || this.selectedIndex >= filtered.Count)
         {
             this.SetStatus("Select an event first.", Color.Red);
             return;
         }
 
-        this.importCutscene(this.importedCutscenes[this.selectedIndex].Cutscene);
+        this.importCutscene(filtered[this.selectedIndex].Cutscene);
         this.close();
     }
 
-    private void DrawEventRow(SpriteBatch spriteBatch, int index, Rectangle bounds)
+    private void DrawEventRow(SpriteBatch spriteBatch, List<ImportCandidate> sourceList, int index, Rectangle bounds)
     {
-        ImportCandidate candidate = this.importedCutscenes[index];
+        ImportCandidate candidate = sourceList[index];
         CutsceneData cutscene = candidate.Cutscene;
         Color color = index == this.selectedIndex ? Color.LightGoldenrodYellow : Color.White;
         IClickableMenu.drawTextureBox(spriteBatch, bounds.X, bounds.Y, bounds.Width, bounds.Height, color);
@@ -427,6 +468,53 @@ public sealed class EventPickerPanel
         int visibleRows = Math.Max(1, (bounds.Center.Y + modalHeight / 2 - 24 - listY) / RowHeight);
         int delta = direction > 0 ? -WheelRows : WheelRows;
         this.folderScrollIndex = Math.Clamp(this.folderScrollIndex + delta, 0, Math.Max(0, directories.Count - visibleRows));
+    }
+
+    private void DrawSearchField(SpriteBatch spriteBatch, int x, int y, int width)
+    {
+        if (this.searchField is null)
+        {
+            this.searchField = new BoundTextField(
+                () => this.searchText,
+                value =>
+                {
+                    this.searchText = value;
+                    this.selectedIndex = -1;
+                    this.listScrollIndex = 0;
+                },
+                numbersOnly: false,
+                textLimit: 80
+            );
+        }
+
+        Rectangle searchBounds = new(x, y, width - 140, 34);
+        this.searchField.SetBounds(searchBounds);
+        this.searchField.Draw(spriteBatch);
+
+        if (string.IsNullOrWhiteSpace(this.searchText) && !this.searchField.Selected)
+        {
+            Utility.drawTextWithShadow(spriteBatch, "Search by name, location, or mod...", Game1.smallFont, new Vector2(searchBounds.X + 8, searchBounds.Y + 6), Color.DimGray);
+        }
+
+        this.buttons.Add((searchBounds, () => this.searchField?.Select()));
+    }
+
+    private List<ImportCandidate> GetFilteredCutscenes()
+    {
+        if (string.IsNullOrWhiteSpace(this.searchText))
+        {
+            return this.importedCutscenes;
+        }
+
+        return this.importedCutscenes.Where(this.MatchesSearch).ToList();
+    }
+
+    private bool MatchesSearch(ImportCandidate candidate)
+    {
+        CutsceneData c = candidate.Cutscene;
+        return c.UniqueId.Contains(this.searchText, StringComparison.OrdinalIgnoreCase)
+            || c.LocationName.Contains(this.searchText, StringComparison.OrdinalIgnoreCase)
+            || (Path.GetFileName(Path.GetDirectoryName(candidate.SourcePath))?.Contains(this.searchText, StringComparison.OrdinalIgnoreCase) == true);
     }
 
     private void DrawLine(SpriteBatch spriteBatch, string text, int x, int y, Color color)

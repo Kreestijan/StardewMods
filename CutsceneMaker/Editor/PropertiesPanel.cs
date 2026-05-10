@@ -313,7 +313,16 @@ public sealed class PropertiesPanel : EditorPanel
 
     private void DrawParameter(SpriteBatch spriteBatch, EventCommandBlock command, EventCommandParameter parameter, int x, int y)
     {
+        string paramValue = this.GetValue(command, parameter);
+        bool hasToken = paramValue.Contains("{{", StringComparison.Ordinal);
+
         this.DrawLine(spriteBatch, parameter.Label, x, y);
+        if (hasToken)
+        {
+            float labelWidth = Game1.smallFont.MeasureString(parameter.Label).X;
+            this.DrawLine(spriteBatch, " [CP]", x + (int)labelWidth, y, Color.CornflowerBlue);
+        }
+
         switch (parameter.Type)
         {
             case EventCommandParameterType.Actor:
