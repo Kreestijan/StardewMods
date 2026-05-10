@@ -124,6 +124,21 @@ public static class LocationBootstrapper
         }
     }
 
+    public static void RegisterPreviewMapOverrides(IEnumerable<PreviewMapOverride> previewMapOverrides)
+    {
+        ArgumentNullException.ThrowIfNull(previewMapOverrides);
+
+        foreach (PreviewMapOverride preview in previewMapOverrides)
+        {
+            if (string.IsNullOrWhiteSpace(preview.TargetMapPath) || string.IsNullOrWhiteSpace(preview.PreviewAssetPath))
+            {
+                continue;
+            }
+
+            PreviewMapOverrides[preview.TargetMapPath] = preview;
+        }
+    }
+
     public static GameLocation? Load(string locationName)
     {
         return LoadDetailed(locationName).Location;
@@ -175,15 +190,23 @@ public static class LocationBootstrapper
         }
 
         LocationData? data = KnownLocationData.GetValueOrDefault(locationIdOrName);
+        string? previewMapPath = GetMapPathCandidates(locationIdOrName)
+            .Select(ResolvePreviewMapPath)
+            .FirstOrDefault();
         return new LocationCatalogEntry(
             Id: locationIdOrName,
             DisplayName: locationIdOrName,
             EventLocationName: locationIdOrName,
-            PreviewMapPath: GetMapPathCandidates(locationIdOrName).FirstOrDefault(),
+            PreviewMapPath: previewMapPath,
             LocationData: data,
             IsFarmVariant: false,
             Source: "Ad-hoc"
         );
+    }
+
+    public static string ResolvePreviewMapPathForMapName(string mapNameOrPath)
+    {
+        return ResolvePreviewMapPath(NormalizeMapPath(mapNameOrPath));
     }
 
     public static string GetDisplayName(string locationIdOrName)
@@ -499,9 +522,10 @@ public static class LocationBootstrapper
 
     private static string NormalizeMapPath(string mapNameOrPath)
     {
-        return mapNameOrPath.StartsWith("Maps/", StringComparison.OrdinalIgnoreCase)
-            ? mapNameOrPath
-            : "Maps/" + mapNameOrPath;
+        string normalized = mapNameOrPath.Replace('\\', '/');
+        return normalized.StartsWith("Maps/", StringComparison.OrdinalIgnoreCase)
+            ? normalized
+            : "Maps/" + normalized;
     }
 
     private static string ResolvePreviewMapPath(string mapPath)

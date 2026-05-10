@@ -136,6 +136,14 @@ public sealed class SaveDialogPanel
         try
         {
             this.state.Cutscene.CutsceneName = this.currentName.Trim();
+            List<string> validationErrors = CutsceneValidator.Validate(this.state.Cutscene, ModEntry.Instance.CommandCatalog, ModEntry.Instance.PreconditionCatalog, forPreview: false);
+            if (validationErrors.Count > 0)
+            {
+                this.statusMessage = validationErrors[0];
+                this.statusColor = Color.Red;
+                return;
+            }
+
             ContentPackWriter.Write(this.state.Cutscene, this.modsPath);
             this.state.IsDirty = false;
             string outputDirectory = Path.Combine(this.modsPath, "[CP] " + this.state.Cutscene.CutsceneName);

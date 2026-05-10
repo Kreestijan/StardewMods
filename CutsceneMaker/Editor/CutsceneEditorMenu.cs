@@ -5,6 +5,7 @@ using CutsceneMaker.Compiler;
 using CutsceneMaker.Importer;
 using CutsceneMaker.Models;
 using StardewValley;
+using StardewValley.Locations;
 using StardewValley.Menus;
 using System.Reflection;
 
@@ -22,17 +23,21 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private const int LocationDropdownMaxRows = 10;
     private const int LocationSearchHeight = 42;
     private const float PreviewFadeDurationMs = 500f;
+    private const float PreviewFarmerMovePixelsPerSecond = 256f;
     // Public SMAPI/game APIs don't expose a writable Game1.player at the title screen.
     // Play preview needs a temporary farmer because Event initialization reads Game1.player.
     private static readonly PropertyInfo? GamePlayerProperty = typeof(Game1).GetProperty("player", BindingFlags.Public | BindingFlags.Static);
     private static readonly FieldInfo? GamePlayerField = typeof(Game1).GetField("_player", BindingFlags.NonPublic | BindingFlags.Static);
+    // Event keeps the active temporary map in a private field; preview sets it so vanilla follow-up commands
+    // that read the temporary map keep working after we load imported CP maps through our preview asset path.
+    private static readonly FieldInfo? EventTemporaryLocationField = typeof(Event).GetField("temporaryLocation", BindingFlags.Instance | BindingFlags.NonPublic);
     private readonly EditorState state = new();
     private readonly MapViewPanel mapViewPanel;
     private readonly TimelinePanel timelinePanel;
     private readonly PropertiesPanel propertiesPanel;
     private readonly List<(Rectangle Bounds, Action LeftClick, Action? RightClick)> toolbarButtons = new();
     private readonly List<(Rectangle Bounds, LocationCatalogEntry Location)> locationDropdownRows = new();
-    private readonly HashSet<int> registeredPreviewEmoteCommands = new();
+    private readonly HashSet<GameLocation> playbackLocations = new();
     private PreconditionEditorPanel? preconditionEditorPanel;
     private SaveDialogPanel? saveDialogPanel;
     private EventPickerPanel? eventPickerPanel;
@@ -41,8 +46,13 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private GameLocation? previousPlayerLocation;
     private Vector2 previousPlayerPosition;
     private int previousPlayerFacing;
+    private byte previousGameMode;
+    private Color previousBgColor;
+    private Color previousAmbientLight;
     private GameLocation? previousLocation;
-    private IClickableMenu? playbackDialogueBox;
+    private Event? playbackEvent;
+    private Farmer? playbackPlayer;
+    private IClickableMenu? playbackMenu;
     private bool previousEventUp;
     private bool previousGlobalFade;
     private bool previousFadeIn;
@@ -50,7 +60,10 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private bool previousNonWarpFade;
     private float previousFadeToBlackAlpha;
     private float previousGlobalFadeSpeed;
+    private xTile.Dimensions.Rectangle previousViewport;
     private bool yieldPlaybackFrame;
+    private float previewPauseRemainingMs;
+    private int previewPauseCommandIndex = -1;
     private bool closeConfirmationOpen;
     private Rectangle closeConfirmYesBounds;
     private Rectangle closeConfirmNoBounds;
@@ -65,6 +78,14 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private bool previewPlayerCreated;
     private bool playbackBootstrapActive;
     private bool playWarningShown;
+    private int lastLoggedPreviewCommandIndex = -1;
+    private string lastLoggedPlaybackMenuType = string.Empty;
+    private int previewFarmerMoveCommandIndex = -1;
+    private Vector2 previewFarmerMoveStart = Vector2.Zero;
+    private Vector2 previewFarmerMoveTarget = Vector2.Zero;
+    private float previewFarmerMoveElapsedMs;
+    private float previewFarmerMoveDurationMs;
+    private int previewFarmerMoveFacing = 2;
 
     public CutsceneEditorMenu()
         : base(
@@ -77,11 +98,79 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     {
         ModEntry.Instance.RefreshKnownLocations();
         ModEntry.Instance.RefreshKnownNpcs();
+        ModEntry.Instance.RefreshCommandCatalog();
         this.LoadPreviewLocation(this.state.Cutscene.LocationName);
         this.mapViewPanel = new MapViewPanel(this.state);
-        this.timelinePanel = new TimelinePanel(this.state);
-        this.propertiesPanel = new PropertiesPanel(this.state, this.OpenPreconditionEditor);
+        this.timelinePanel = new TimelinePanel(this.state, ModEntry.Instance.CommandCatalog);
+        this.propertiesPanel = new PropertiesPanel(this.state, ModEntry.Instance.CommandCatalog, this.OpenPreconditionEditor);
         this.RecalculateLayout();
+    }
+
+    internal static CutsceneEditorMenu? ActivePlaybackMenu { get; private set; }
+
+    internal void ContainPreviewGameState()
+    {
+        if (this.state.Mode != EditorMode.Play || this.playbackEvent is null)
+        {
+            return;
+        }
+
+        bool contained = false;
+        if (Game1.gameMode != this.previousGameMode)
+        {
+            Game1.gameMode = this.previousGameMode;
+            contained = true;
+        }
+
+        GameLocation? location = this.state.BootstrappedMap;
+        if (location is not null)
+        {
+            if (!ReferenceEquals(Game1.currentLocation, location))
+            {
+                Game1.currentLocation = location;
+                contained = true;
+            }
+
+            if (!ReferenceEquals(location.currentEvent, this.playbackEvent))
+            {
+                location.currentEvent = this.playbackEvent;
+                contained = true;
+            }
+        }
+
+        if (this.playbackPlayer is not null)
+        {
+            if (!ReferenceEquals(Game1.player, this.playbackPlayer))
+            {
+                SetGamePlayer(this.playbackPlayer);
+                contained = true;
+            }
+
+            if (location is not null && !ReferenceEquals(this.playbackPlayer.currentLocation, location))
+            {
+                this.playbackPlayer.currentLocation = location;
+                this.playbackEvent.farmer.currentLocation = location;
+                contained = true;
+            }
+        }
+
+        if (!ReferenceEquals(Game1.activeClickableMenu, this))
+        {
+            Game1.activeClickableMenu = this;
+            contained = true;
+        }
+
+        if (Game1.eventUp || Game1.eventOver)
+        {
+            Game1.eventUp = false;
+            Game1.eventOver = false;
+            contained = true;
+        }
+
+        if (contained)
+        {
+            this.LogPreviewMessage($"contained leaked game state; {this.FormatPreviewState()}");
+        }
     }
 
     public override void gameWindowSizeChanged(Rectangle oldBounds, Rectangle newBounds)
@@ -111,7 +200,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             this.DrawLocationDropdown(b);
         }
 
-        this.playbackDialogueBox?.draw(b);
+        this.playbackMenu?.draw(b);
         this.preconditionEditorPanel?.Draw(b);
         this.saveDialogPanel?.Draw(b);
         this.eventPickerPanel?.Draw(b);
@@ -130,8 +219,10 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         {
             this.UpdatePlayback(time);
         }
-
-        this.UpdatePlaybackDialogue(time);
+        else
+        {
+            this.UpdatePlaybackDialogue(time);
+        }
         this.mapViewPanel.Update();
         this.timelinePanel.Update();
         this.propertiesPanel.Update();
@@ -191,15 +282,15 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
         if (this.state.Mode == EditorMode.Play)
         {
-            if (this.playbackDialogueBox is not null)
+            if (this.playbackMenu is not null)
             {
-                this.RouteInputToPlaybackDialogue(dialogueBox => dialogueBox.receiveLeftClick(x, y, playSound));
+                this.RouteInputToPlaybackMenu(menu => menu.receiveLeftClick(x, y, playSound));
             }
 
             return;
         }
 
-        if (this.timelinePanel.WantsClick(x, y))
+        if (this.timelinePanel.HasTransientMenu || this.timelinePanel.WantsClick(x, y))
         {
             this.timelinePanel.ReceiveLeftClick(x, y);
             return;
@@ -239,6 +330,12 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
     public override void releaseLeftClick(int x, int y)
     {
+        if (this.state.Mode == EditorMode.Play && this.playbackMenu is not null)
+        {
+            this.RouteInputToPlaybackMenu(menu => menu.releaseLeftClick(x, y));
+            return;
+        }
+
         this.timelinePanel.ReleaseLeftClick(x, y);
         base.releaseLeftClick(x, y);
     }
@@ -300,7 +397,13 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             return;
         }
 
-        if (this.preconditionEditorPanel is not null || this.saveDialogPanel is not null || this.eventPickerPanel is not null || this.state.Mode == EditorMode.Play)
+        if (this.eventPickerPanel is not null)
+        {
+            this.eventPickerPanel.ReceiveScrollWheelAction(direction);
+            return;
+        }
+
+        if (this.preconditionEditorPanel is not null || this.saveDialogPanel is not null || this.state.Mode == EditorMode.Play)
         {
             return;
         }
@@ -314,9 +417,21 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             return;
         }
 
+        if (this.timelinePanel.AddMenuOpen)
+        {
+            this.timelinePanel.ReceiveScrollWheelAction(direction);
+            return;
+        }
+
         if (this.mapViewPanel.Bounds.Contains(mouseX, mouseY))
         {
             this.mapViewPanel.ReceiveScrollWheelAction(direction);
+            return;
+        }
+
+        if (this.propertiesPanel.Bounds.Contains(mouseX, mouseY))
+        {
+            this.propertiesPanel.ReceiveScrollWheelAction(direction);
             return;
         }
 
@@ -370,6 +485,18 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             return;
         }
 
+        if (key == Keys.Escape && this.timelinePanel.HasTransientMenu)
+        {
+            this.timelinePanel.CloseTransientMenusByUser();
+            return;
+        }
+
+        if (this.timelinePanel.HasSelectedTextField())
+        {
+            this.timelinePanel.ReceiveKeyPress(key);
+            return;
+        }
+
         if (this.propertiesPanel.HasSelectedTextField())
         {
             this.propertiesPanel.ReceiveKeyPress(key);
@@ -379,6 +506,12 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         if (key == Keys.Escape && this.state.Mode == EditorMode.Play)
         {
             this.StopPlayback("Preview stopped.");
+            return;
+        }
+
+        if (this.state.Mode == EditorMode.Play && this.playbackMenu is not null)
+        {
+            this.RouteInputToPlaybackMenu(menu => menu.receiveKeyPress(key));
             return;
         }
 
@@ -393,7 +526,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
     private void OpenPreconditionEditor()
     {
-        this.preconditionEditorPanel = new PreconditionEditorPanel(this.state, () => this.preconditionEditorPanel = null);
+        this.preconditionEditorPanel = new PreconditionEditorPanel(this.state, ModEntry.Instance.PreconditionCatalog, () => this.preconditionEditorPanel = null);
     }
 
     private void OpenSaveDialog()
@@ -440,10 +573,11 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.state.Cutscene = CutsceneData.CreateBlank();
         this.state.SelectedCommandIndex = -1;
         this.state.PlaybackCommandIndex = -1;
+        this.state.CommandMarkerIndex = -1;
+        this.state.SimulatedActorPositions.Clear();
         this.state.Mode = EditorMode.Edit;
         this.state.UndoStack.Clear();
         this.state.RedoStack.Clear();
-        this.state.PreviewEmotes.Clear();
         this.LoadPreviewLocation(this.state.Cutscene.LocationName);
         this.state.IsDirty = false;
         this.toolbarStatusMessage = "Started a new cutscene.";
@@ -681,9 +815,16 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private void ImportCutscene(CutsceneData cutscene)
     {
         this.StopPlayback();
+        if (cutscene.ImportContext?.PreviewMapOverrides.Count > 0)
+        {
+            ModEntry.Instance.RegisterImportedPreviewMapOverrides(cutscene.ImportContext.PreviewMapOverrides.Values);
+        }
+
         this.state.Cutscene = cutscene;
         this.state.SelectedCommandIndex = -1;
         this.state.PlaybackCommandIndex = -1;
+        this.state.CommandMarkerIndex = -1;
+        this.state.SimulatedActorPositions.Clear();
         this.state.Mode = EditorMode.Edit;
         this.state.UndoStack.Clear();
         this.state.RedoStack.Clear();
@@ -713,6 +854,15 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     {
         try
         {
+            this.propertiesPanel.CommitSelectedTextFields();
+
+            List<string> validationErrors = CutsceneValidator.Validate(this.state.Cutscene, ModEntry.Instance.CommandCatalog, ModEntry.Instance.PreconditionCatalog, forPreview: true);
+            if (validationErrors.Count > 0)
+            {
+                this.toolbarStatusMessage = "Cannot preview: " + this.TrimToolbarText(validationErrors[0], 80);
+                return;
+            }
+
             GameLocation? location = this.state.BootstrappedMap ?? this.LoadPreviewLocation(this.state.SelectedLocationId).Location;
             if (location is null)
             {
@@ -722,6 +872,9 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
             this.previousPlayer = Game1.player;
             this.previousLocation = Game1.currentLocation;
+            this.previousGameMode = Game1.gameMode;
+            this.previousBgColor = Game1.bgColor;
+            this.previousAmbientLight = Game1.ambientLight;
             this.previousEventUp = Game1.eventUp;
             this.previousGlobalFade = Game1.globalFade;
             this.previousFadeIn = Game1.fadeIn;
@@ -729,6 +882,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             this.previousNonWarpFade = Game1.nonWarpFade;
             this.previousFadeToBlackAlpha = Game1.fadeToBlackAlpha;
             this.previousGlobalFadeSpeed = Game1.globalFadeSpeed;
+            this.previousViewport = Game1.viewport;
             this.previewPlayerCreated = Game1.player is null;
             this.playbackBootstrapActive = true;
 
@@ -746,32 +900,62 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             this.previousPlayerLocation = previewPlayer.currentLocation;
             this.previousPlayerPosition = previewPlayer.Position;
             this.previousPlayerFacing = previewPlayer.FacingDirection;
+            this.playbackPlayer = previewPlayer;
             previewPlayer.currentLocation = location;
-            previewPlayer.Position = new Vector2(
-                this.state.Cutscene.FarmerPlacement.TileX * Game1.tileSize,
-                this.state.Cutscene.FarmerPlacement.TileY * Game1.tileSize
-            );
+            Point previewPlayerTile = this.state.Cutscene.IncludeFarmer
+                ? this.GetPreviewPlayerTile()
+                : new Point(-100, -100);
+            previewPlayer.Position = new Vector2(previewPlayerTile.X * Game1.tileSize, previewPlayerTile.Y * Game1.tileSize);
 
             Game1.currentLocation = location;
+            Game1.viewport = this.GetInitialPlaybackViewport(location, previewPlayerTile);
             location.currentEvent = null;
             location.characters.Clear();
+            this.playbackLocations.Clear();
+            this.playbackLocations.Add(location);
+            this.playbackMenu = null;
+            this.yieldPlaybackFrame = false;
+            this.previewPauseRemainingMs = 0f;
+            this.previewPauseCommandIndex = -1;
+            this.ResetPreviewFarmerMove();
+            Game1.activeClickableMenu = null;
+            Game1.dialogueUp = false;
+            Game1.globalFade = false;
+            Game1.fadeIn = false;
+            Game1.fadeToBlack = false;
+            Game1.nonWarpFade = false;
+            Game1.fadeToBlackAlpha = 0f;
+            Game1.pauseTime = 0f;
+            ModEntry.Instance.SetImportedPreviewMapAssetRequestsEnabled(true);
 
-            string script = EventScriptBuilder.Build(this.state.Cutscene);
+            string script = EventScriptBuilder.Build(
+    this.state.Cutscene,
+    ModEntry.Instance.CommandCatalog,
+    startCommandIndex: this.state.CommandMarkerIndex,
+    initialPositions: this.state.CommandMarkerIndex >= 0
+        ? this.state.SimulatedActorPositions
+        : null
+);
             Event previewEvent = new(script, null, this.state.Cutscene.UniqueId, previewPlayer)
             {
                 markEventSeen = false
             };
+            this.playbackEvent = previewEvent;
             location.currentEvent = previewEvent;
             Game1.activeClickableMenu = this;
-            Game1.eventUp = true;
+            // Keep the preview local to the editor. Setting the global event flag makes other mods treat
+            // this as a real in-game event even though we're driving Event.Update manually from a menu.
+            Game1.eventUp = false;
             Game1.eventOver = false;
             Game1.pauseTime = 0f;
             this.state.BootstrappedMap = location;
             this.state.Mode = EditorMode.Play;
-            this.state.PlaybackCommandIndex = 0;
-            this.state.PreviewEmotes.Clear();
-            this.registeredPreviewEmoteCommands.Clear();
+            this.state.PlaybackCommandIndex = Math.Max(0, this.state.CommandMarkerIndex);
+            this.lastLoggedPreviewCommandIndex = -1;
+            this.lastLoggedPlaybackMenuType = string.Empty;
             this.toolbarStatusMessage = "Preview playing.";
+            ActivePlaybackMenu = this;
+            this.LogPreviewMessage($"started scriptCommands={previewEvent.eventCommands.Length} location={this.FormatLocation(location)} viewport={FormatViewport(Game1.viewport)}");
         }
         catch (Exception ex)
         {
@@ -794,40 +978,74 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         try
         {
             Game1.currentLocation = location;
+            if (this.playbackMenu is not null)
+            {
+                this.UpdateEventActorEmotes(currentEvent, time);
+                this.UpdatePreviewFades(currentEvent, time);
+                this.UpdatePlaybackDialogue(time);
+                if (this.playbackMenu is not null)
+                {
+                    return;
+                }
+            }
+
             if (this.yieldPlaybackFrame)
             {
                 this.yieldPlaybackFrame = false;
-                this.UpdatePreviewEmotes(time);
                 this.UpdateEventActorEmotes(currentEvent, time);
-                this.CapturePlaybackDialogue();
+                this.CapturePlaybackMenu();
                 return;
             }
 
-            if (Game1.pauseTime > 0f)
+            if (this.UpdatePreviewPause(currentEvent, time))
             {
-                Game1.pauseTime = Math.Max(0f, Game1.pauseTime - (float)time.ElapsedGameTime.TotalMilliseconds);
+                return;
+            }
+
+            if (this.UpdatePreviewFarmerMove(currentEvent, time))
+            {
+                this.CapturePlaybackMenu();
+                return;
             }
 
             Game1.player?.updateEmote(time);
-            this.UpdatePreviewEmotes(time);
             if (Game1.activeClickableMenu == this)
             {
                 Game1.activeClickableMenu = null;
             }
 
             int commandBeforeUpdate = currentEvent.CurrentCommand;
-            this.RegisterPreviewEmotes(currentEvent, commandBeforeUpdate, commandBeforeUpdate + 1);
-            currentEvent.Update(location, time);
+            this.LogPreviewCommand(currentEvent);
+            if (!this.TryHandlePreviewOnlyCommand(currentEvent))
+            {
+                currentEvent.Update(location, time);
+            }
+
+            currentEvent = this.SyncPlaybackLocationAfterUpdate(location, currentEvent);
+            this.CapturePreviewPause(currentEvent);
             this.UpdatePreviewFarmerMovementAnimation(time);
-            this.UpdatePreviewGlobalFade(currentEvent, time);
-            this.RegisterPreviewEmotes(currentEvent, commandBeforeUpdate, currentEvent.CurrentCommand);
-            this.CapturePlaybackDialogue();
-            if (!Game1.eventOver && currentEvent.CurrentCommand != commandBeforeUpdate)
+            this.UpdatePreviewFades(currentEvent, time);
+            this.CapturePlaybackMenu();
+
+            // Save event-finished flag before ContainPreviewGameState clears Game1.eventOver
+            bool eventFinished = currentEvent.CurrentCommand >= currentEvent.eventCommands.Length;
+
+            this.ContainPreviewGameState();
+
+            if (currentEvent.CurrentCommand != commandBeforeUpdate)
             {
                 this.yieldPlaybackFrame = true;
             }
 
-            if (Game1.eventOver && currentEvent.CurrentCommand >= currentEvent.eventCommands.Length)
+            // Track which command is being processed, mapped back to CutsceneData.Command index.
+            // Use commandBeforeUpdate because CurrentCommand already points to the next script entry.
+            // Treat CommandMarkerIndex -1 (setup) as 0 — setup isn't a real playable command.
+            int effectiveMarker = Math.Max(0, this.state.CommandMarkerIndex);
+            int headerEntries = EventScriptBuilder.GetHeaderEntryCount(this.state.Cutscene);
+            int playbackIndex = effectiveMarker + Math.Max(0, commandBeforeUpdate - headerEntries);
+            this.state.PlaybackCommandIndex = Math.Clamp(playbackIndex, effectiveMarker, this.state.Cutscene.Commands.Count - 1);
+
+            if (eventFinished)
             {
                 if (this.HasActivePlaybackEmote(currentEvent))
                 {
@@ -840,10 +1058,353 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
         catch (Exception ex)
         {
-            ModEntry.Instance.Monitor.Log($"Cutscene Maker play preview update failed: {ex}", StardewModdingAPI.LogLevel.Error);
-            this.StopPlayback();
-            this.toolbarStatusMessage = "Preview failed. See SMAPI log.";
+            string commandContext = GetEventCommandContext(currentEvent);
+            ModEntry.Instance.Monitor.Log($"Cutscene Maker play preview update failed at {commandContext}: {ex}", StardewModdingAPI.LogLevel.Error);
+            this.StopPlayback("Preview failed. See SMAPI log.");
+            Game1.activeClickableMenu = this;
         }
+    }
+
+    private bool TryHandlePreviewOnlyCommand(Event currentEvent)
+    {
+        string? rawCommand = GetCurrentEventCommand(currentEvent);
+        if (string.IsNullOrWhiteSpace(rawCommand))
+        {
+            return false;
+        }
+
+        List<string> parts = QuoteAwareSplit.Split(rawCommand, ' ')
+            .Select(part => part.Trim())
+            .Where(part => part.Length > 0)
+            .ToList();
+        if (parts.Count < 2)
+        {
+            return false;
+        }
+
+        if (parts[0].Equals("move", StringComparison.Ordinal)
+            && parts[1].Equals("farmer", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.HandlePreviewFarmerMove(currentEvent, parts, rawCommand);
+        }
+
+        if (parts[0].Equals("changeLocation", StringComparison.Ordinal))
+        {
+            return this.HandlePreviewChangeLocation(currentEvent, parts, rawCommand);
+        }
+
+        if (parts[0].Equals("changeToTemporaryMap", StringComparison.Ordinal))
+        {
+            return this.HandlePreviewChangeToTemporaryMap(currentEvent, parts, rawCommand);
+        }
+
+        return false;
+    }
+
+    private bool HandlePreviewFarmerMove(Event currentEvent, List<string> parts, string rawCommand)
+    {
+        if (parts.Count < 5
+            || !int.TryParse(Unquote(parts[2]), out int deltaX)
+            || !int.TryParse(Unquote(parts[3]), out int deltaY)
+            || !int.TryParse(Unquote(parts[4]), out int facing))
+        {
+            return false;
+        }
+
+        Farmer? player = Game1.player;
+        if (player is null)
+        {
+            currentEvent.CurrentCommand++;
+            return true;
+        }
+
+        bool continueImmediately = parts.Count >= 6 && bool.TryParse(Unquote(parts[5]), out bool parsedContinue) && parsedContinue;
+        Vector2 start = player.Position;
+        Vector2 target = start + new Vector2(deltaX * Game1.tileSize, deltaY * Game1.tileSize);
+        facing = NormalizeFacingDirection(facing);
+        player.faceDirection(facing);
+
+        if (continueImmediately || start == target)
+        {
+            player.Position = target;
+            player.Halt();
+            currentEvent.CurrentCommand++;
+            this.ResetPreviewFarmerMove();
+            this.LogPreviewMessage($"handled preview farmer move raw='{rawCommand}' immediately target={target.X:0},{target.Y:0} state={this.FormatPreviewState()}");
+            return true;
+        }
+
+        this.previewFarmerMoveCommandIndex = currentEvent.CurrentCommand;
+        this.previewFarmerMoveStart = start;
+        this.previewFarmerMoveTarget = target;
+        this.previewFarmerMoveElapsedMs = 0f;
+        this.previewFarmerMoveDurationMs = Math.Max(1f, Vector2.Distance(start, target) / PreviewFarmerMovePixelsPerSecond * 1000f);
+        this.previewFarmerMoveFacing = facing;
+        this.LogPreviewMessage($"started preview farmer move raw='{rawCommand}' from={start.X:0},{start.Y:0} to={target.X:0},{target.Y:0} durationMs={this.previewFarmerMoveDurationMs:0.##} state={this.FormatPreviewState()}");
+        return true;
+    }
+
+    private bool UpdatePreviewFarmerMove(Event currentEvent, GameTime time)
+    {
+        if (this.previewFarmerMoveCommandIndex < 0)
+        {
+            return false;
+        }
+
+        Farmer? player = Game1.player;
+        if (player is null || currentEvent.CurrentCommand != this.previewFarmerMoveCommandIndex)
+        {
+            this.ResetPreviewFarmerMove();
+            return false;
+        }
+
+        this.previewFarmerMoveElapsedMs += Math.Max(1f, (float)time.ElapsedGameTime.TotalMilliseconds);
+        float progress = Math.Clamp(this.previewFarmerMoveElapsedMs / Math.Max(1f, this.previewFarmerMoveDurationMs), 0f, 1f);
+        player.faceDirection(this.previewFarmerMoveFacing);
+        player.Position = Vector2.Lerp(this.previewFarmerMoveStart, this.previewFarmerMoveTarget, progress);
+        this.UpdatePreviewFarmerMovementAnimation(time);
+
+        if (progress >= 1f)
+        {
+            player.Position = this.previewFarmerMoveTarget;
+            player.Halt();
+            currentEvent.CurrentCommand++;
+            this.ResetPreviewFarmerMove();
+            this.yieldPlaybackFrame = true;
+        }
+
+        Game1.pauseTime = 0f;
+        this.UpdateEventActorEmotes(currentEvent, time);
+        this.UpdatePreviewFades(currentEvent, time);
+        return true;
+    }
+
+    private bool HandlePreviewChangeLocation(Event currentEvent, List<string> parts, string rawCommand)
+    {
+        string locationName = Unquote(parts[1]);
+        this.LogPreviewMessage($"handling changeLocation raw='{rawCommand}' before={this.FormatPreviewState()}");
+        LocationLoadResult loadResult = LocationBootstrapper.LoadDetailed(locationName);
+        if (loadResult.Location is null)
+        {
+            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not handle '{rawCommand}': {loadResult.FailureReason}", StardewModdingAPI.LogLevel.Warn);
+            return false;
+        }
+
+        GameLocation? previousLocation = Game1.currentLocation;
+        if (previousLocation is not null && !ReferenceEquals(previousLocation, loadResult.Location))
+        {
+            previousLocation.currentEvent = null;
+        }
+
+        Game1.currentLocation = loadResult.Location;
+        loadResult.Location.currentEvent = currentEvent;
+        loadResult.Location.ResetForEvent(currentEvent);
+        this.state.BootstrappedMap = loadResult.Location;
+        this.playbackLocations.Add(loadResult.Location);
+
+        if (Game1.player is not null)
+        {
+            Game1.player.currentLocation = loadResult.Location;
+        }
+
+        currentEvent.farmer.currentLocation = loadResult.Location;
+        currentEvent.CurrentCommand++;
+        this.LogPreviewMessage($"handled changeLocation raw='{rawCommand}' after={this.FormatPreviewState()} tilesheets={FormatTileSheets(loadResult.Location)}");
+        return true;
+    }
+
+    private bool HandlePreviewChangeToTemporaryMap(Event currentEvent, List<string> parts, string rawCommand)
+    {
+        string mapName = Unquote(parts[1]);
+        bool shouldPan = true;
+        if (parts.Count >= 3 && bool.TryParse(Unquote(parts[2]), out bool parsedShouldPan))
+        {
+            shouldPan = parsedShouldPan;
+        }
+
+        string previewMapPath = LocationBootstrapper.ResolvePreviewMapPathForMapName(mapName);
+        try
+        {
+            this.LogPreviewMessage($"handling changeToTemporaryMap raw='{rawCommand}' resolved='{previewMapPath}' before={this.FormatPreviewState()}");
+            GameLocation temporaryLocation = mapName.Equals("Town", StringComparison.OrdinalIgnoreCase)
+                ? new Town(previewMapPath, "Temp")
+                : new GameLocation(previewMapPath, "Temp");
+            temporaryLocation.map.LoadTileSheets(Game1.mapDisplayDevice);
+
+            Event runningEvent = Game1.currentLocation?.currentEvent ?? currentEvent;
+            GameLocation? previousLocation = Game1.currentLocation;
+            previousLocation?.cleanupBeforePlayerExit();
+            if (previousLocation is not null)
+            {
+                previousLocation.currentEvent = null;
+            }
+
+            Game1.currentLightSources.Clear();
+            Game1.currentLocation = temporaryLocation;
+            temporaryLocation.resetForPlayerEntry();
+            temporaryLocation.UpdateMapSeats();
+            temporaryLocation.currentEvent = runningEvent;
+            EventTemporaryLocationField?.SetValue(runningEvent, temporaryLocation);
+            runningEvent.CurrentCommand++;
+
+            if (Game1.player is not null)
+            {
+                Game1.player.currentLocation = temporaryLocation;
+            }
+
+            runningEvent.farmer.currentLocation = temporaryLocation;
+            temporaryLocation.ResetForEvent(runningEvent);
+            if (shouldPan)
+            {
+                Game1.panScreen(0, 0);
+            }
+
+            this.state.BootstrappedMap = temporaryLocation;
+            this.playbackLocations.Add(temporaryLocation);
+            this.LogPreviewMessage($"handled changeToTemporaryMap map='{mapName}' resolved='{previewMapPath}' location={this.FormatLocation(temporaryLocation)} tilesheets={FormatTileSheets(temporaryLocation)} state={this.FormatPreviewState()}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not handle '{rawCommand}' via '{previewMapPath}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
+            return false;
+        }
+    }
+
+    private Event SyncPlaybackLocationAfterUpdate(GameLocation previousLocation, Event previousEvent)
+    {
+        GameLocation? currentLocation = Game1.currentLocation;
+        if (currentLocation is null || ReferenceEquals(currentLocation, previousLocation))
+        {
+            return previousEvent;
+        }
+
+        Event? currentEvent = currentLocation.currentEvent;
+        if (currentEvent is null)
+        {
+            currentLocation.currentEvent = previousEvent;
+            currentEvent = previousEvent;
+        }
+
+        previousLocation.currentEvent = null;
+        this.state.BootstrappedMap = currentLocation;
+        this.playbackLocations.Add(currentLocation);
+
+        if (Game1.player is not null)
+        {
+            Game1.player.currentLocation = currentLocation;
+        }
+
+        return currentEvent;
+    }
+
+    private bool UpdatePreviewPause(Event currentEvent, GameTime time)
+    {
+        if (this.previewPauseRemainingMs <= 0f)
+        {
+            return false;
+        }
+
+        this.previewPauseRemainingMs -= time.ElapsedGameTime.Milliseconds;
+        if (this.previewPauseRemainingMs <= 0f)
+        {
+            this.previewPauseRemainingMs = 0f;
+            if (this.previewPauseCommandIndex == currentEvent.CurrentCommand)
+            {
+                currentEvent.CurrentCommand++;
+            }
+
+            this.previewPauseCommandIndex = -1;
+        }
+
+        Game1.pauseTime = 0f;
+        Game1.player?.updateEmote(time);
+        this.UpdateEventActorEmotes(currentEvent, time);
+        this.UpdatePreviewFarmerMovementAnimation(time);
+        this.UpdatePreviewFades(currentEvent, time);
+        this.ContainPreviewGameState();
+        return true;
+    }
+
+    private void CapturePreviewPause(Event currentEvent)
+    {
+        if (Game1.pauseTime <= 0f)
+        {
+            return;
+        }
+
+        this.previewPauseRemainingMs = Game1.pauseTime;
+        this.previewPauseCommandIndex = currentEvent.CurrentCommand;
+        Game1.pauseTime = 0f;
+        this.LogPreviewMessage($"captured pause command={currentEvent.CurrentCommand + 1}/{currentEvent.eventCommands.Length} durationMs={this.previewPauseRemainingMs:0.##} state={this.FormatPreviewState()}");
+    }
+
+    private static string? GetCurrentEventCommand(Event currentEvent)
+    {
+        string[]? commands = currentEvent.eventCommands;
+        int commandIndex = currentEvent.CurrentCommand;
+        return commands is not null && commandIndex >= 0 && commandIndex < commands.Length
+            ? commands[commandIndex]
+            : null;
+    }
+
+    private static string Unquote(string value)
+    {
+        return value.Length >= 2 && value[0] == '"' && value[^1] == '"'
+            ? value[1..^1].Replace("\\\"", "\"", StringComparison.Ordinal)
+            : value;
+    }
+
+    private static int NormalizeFacingDirection(int facing)
+    {
+        return facing is >= 0 and <= 3 ? facing : 2;
+    }
+
+    private void ResetPreviewFarmerMove()
+    {
+        this.previewFarmerMoveCommandIndex = -1;
+        this.previewFarmerMoveStart = Vector2.Zero;
+        this.previewFarmerMoveTarget = Vector2.Zero;
+        this.previewFarmerMoveElapsedMs = 0f;
+        this.previewFarmerMoveDurationMs = 0f;
+        this.previewFarmerMoveFacing = 2;
+    }
+
+    private Point GetPreviewPlayerTile()
+    {
+        if (this.state.Cutscene.IncludeFarmer)
+        {
+            return new Point(this.state.Cutscene.FarmerPlacement.TileX, this.state.Cutscene.FarmerPlacement.TileY);
+        }
+
+        if (this.state.Cutscene.ViewportStartX >= 0 && this.state.Cutscene.ViewportStartY >= 0)
+        {
+            return new Point(this.state.Cutscene.ViewportStartX, this.state.Cutscene.ViewportStartY);
+        }
+
+        NpcPlacement? actor = this.state.Cutscene.Actors.FirstOrDefault();
+        return actor is not null
+            ? new Point(actor.TileX, actor.TileY)
+            : Point.Zero;
+    }
+
+    private xTile.Dimensions.Rectangle GetInitialPlaybackViewport(GameLocation location, Point fallbackTile)
+    {
+        int viewportWidth = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
+        int viewportHeight = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+        int tileX = this.state.Cutscene.ViewportStartX >= 0 ? this.state.Cutscene.ViewportStartX : fallbackTile.X;
+        int tileY = this.state.Cutscene.ViewportStartY >= 0 ? this.state.Cutscene.ViewportStartY : fallbackTile.Y;
+
+        int x = Math.Max(0, tileX * Game1.tileSize);
+        int y = Math.Max(0, tileY * Game1.tileSize);
+        int maxX = Math.Max(0, location.Map.DisplayWidth - viewportWidth);
+        int maxY = Math.Max(0, location.Map.DisplayHeight - viewportHeight);
+        return new xTile.Dimensions.Rectangle(
+            Math.Clamp(x, 0, maxX),
+            Math.Clamp(y, 0, maxY),
+            viewportWidth,
+            viewportHeight
+        );
     }
 
     private void StopPlayback(string? statusMessage = null)
@@ -853,21 +1414,36 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             return;
         }
 
-        if (this.state.BootstrappedMap is not null)
+        foreach (GameLocation location in this.playbackLocations)
         {
-            this.state.BootstrappedMap.currentEvent = null;
-            this.state.BootstrappedMap.characters.Clear();
+            location.currentEvent = null;
+            location.characters.Clear();
         }
 
-        this.playbackDialogueBox = null;
+        this.playbackLocations.Clear();
+        if (ReferenceEquals(ActivePlaybackMenu, this))
+        {
+            ActivePlaybackMenu = null;
+        }
+
+        this.playbackEvent = null;
+        this.playbackPlayer = null;
+        this.playbackMenu = null;
         this.yieldPlaybackFrame = false;
-        this.state.PreviewEmotes.Clear();
-        this.registeredPreviewEmoteCommands.Clear();
+        this.previewPauseRemainingMs = 0f;
+        this.previewPauseCommandIndex = -1;
+        this.ResetPreviewFarmerMove();
+        this.lastLoggedPreviewCommandIndex = -1;
+        this.lastLoggedPlaybackMenuType = string.Empty;
         Game1.dialogueUp = false;
         Game1.dialogueTyping = false;
         Game1.eventUp = this.previousEventUp;
         Game1.eventOver = false;
         Game1.pauseTime = 0f;
+        Game1.gameMode = this.previousGameMode;
+        Game1.bgColor = this.previousBgColor;
+        Game1.ambientLight = this.previousAmbientLight;
+        Game1.viewport = this.previousViewport;
         Game1.globalFade = this.previousGlobalFade;
         Game1.fadeIn = this.previousFadeIn;
         Game1.fadeToBlack = this.previousFadeToBlack;
@@ -891,12 +1467,16 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
 
         Game1.currentLocation = this.previousLocation;
+        ModEntry.Instance.SetImportedPreviewMapAssetRequestsEnabled(false);
         this.previewPlayerCreated = false;
         this.playbackBootstrapActive = false;
         this.previousPlayer = null;
         this.previousPlayerLocation = null;
         this.previousPlayerPosition = Vector2.Zero;
         this.previousPlayerFacing = 2;
+        this.previousGameMode = 0;
+        this.previousBgColor = default;
+        this.previousAmbientLight = default;
         this.previousLocation = null;
         this.previousEventUp = false;
         this.previousGlobalFade = false;
@@ -905,11 +1485,104 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.previousNonWarpFade = false;
         this.previousFadeToBlackAlpha = 0f;
         this.previousGlobalFadeSpeed = 0f;
+        this.previousViewport = default;
 
         if (!string.IsNullOrWhiteSpace(statusMessage))
         {
             this.toolbarStatusMessage = statusMessage;
         }
+    }
+
+    private void FastTrack()
+    {
+        int nextIndex = this.state.CommandMarkerIndex + 1;
+
+        if (nextIndex >= this.state.Cutscene.Commands.Count)
+        {
+            this.toolbarStatusMessage = "Already at the end of the cutscene.";
+            return;
+        }
+
+        object command = this.state.Cutscene.Commands[nextIndex];
+        this.SimulateCommandEffect(command);
+        this.state.CommandMarkerIndex = nextIndex;
+    }
+
+    private void SimulateCommandEffect(object command)
+    {
+        if (command is not EventCommandBlock eventCommand)
+        {
+            return;
+        }
+
+        string actorName = this.ResolveActorNameForSimulation(eventCommand);
+        if (string.IsNullOrEmpty(actorName))
+        {
+            return;
+        }
+
+        switch (eventCommand.CommandId)
+        {
+            case "vanilla.move":
+            {
+                string tx = eventCommand.Values.GetValueOrDefault("targetX", string.Empty);
+                string ty = eventCommand.Values.GetValueOrDefault("targetY", string.Empty);
+                if (int.TryParse(tx, out int targetX) && int.TryParse(ty, out int targetY))
+                {
+                    this.state.SimulatedActorPositions[actorName] = new Point(targetX, targetY);
+                }
+
+                break;
+            }
+
+            case "vanilla.warp":
+            {
+                string wx = eventCommand.Values.GetValueOrDefault("x", string.Empty);
+                string wy = eventCommand.Values.GetValueOrDefault("y", string.Empty);
+                if (int.TryParse(wx, out int warpX) && int.TryParse(wy, out int warpY))
+                {
+                    this.state.SimulatedActorPositions[actorName] = new Point(warpX, warpY);
+                }
+
+                break;
+            }
+        }
+    }
+
+    private string ResolveActorNameForSimulation(EventCommandBlock command)
+    {
+        string? slotId = command.ActorSlotIds.GetValueOrDefault("actor");
+        if (!string.IsNullOrWhiteSpace(slotId))
+        {
+            if (slotId.Equals(this.state.Cutscene.FarmerPlacement.ActorSlotId, StringComparison.Ordinal))
+            {
+                return "farmer";
+            }
+
+            NpcPlacement? actor = this.state.Cutscene.Actors.FirstOrDefault(a =>
+                a.ActorSlotId.Equals(slotId, StringComparison.Ordinal));
+            if (actor is not null && !string.IsNullOrWhiteSpace(actor.ActorName))
+            {
+                return actor.ActorName;
+            }
+
+            return string.Empty;
+        }
+
+        return command.Values.GetValueOrDefault("actor", string.Empty);
+    }
+
+    private void ResetMarker()
+    {
+        this.state.CommandMarkerIndex = -1;
+        this.state.SimulatedActorPositions.Clear();
+        this.toolbarStatusMessage = "Marker reset to setup.";
+    }
+
+    private void UpdatePreviewFades(Event currentEvent, GameTime time)
+    {
+        this.UpdatePreviewGlobalFade(currentEvent, time);
+        this.UpdatePreviewScreenFade(time);
     }
 
     private void UpdatePreviewGlobalFade(Event currentEvent, GameTime time)
@@ -944,16 +1617,161 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     {
         currentEvent.incrementCommandAfterFade();
         Game1.globalFade = false;
+        if (Game1.nonWarpFade)
+        {
+            Game1.fadeToBlack = false;
+        }
+    }
+
+    private void UpdatePreviewScreenFade(GameTime time)
+    {
+        if (!Game1.fadeToBlack)
+        {
+            return;
+        }
+
+        // The vanilla viewport command uses a non-warp fade as a short transition after moving the camera.
+        // In the editor preview there is no full game fade update loop, so start clearing it as soon as it
+        // reaches black or it can leave the map panel hidden behind a permanent black overlay.
+        if (!Game1.globalFade && Game1.nonWarpFade && Game1.fadeIn && Game1.fadeToBlackAlpha >= 1f)
+        {
+            Game1.fadeIn = false;
+            Game1.nonWarpFade = false;
+        }
+
+        float elapsedMs = Math.Max(1f, (float)time.ElapsedGameTime.TotalMilliseconds);
+        float fadeStep = 0.0008f * elapsedMs;
+        if (Game1.fadeIn)
+        {
+            Game1.fadeToBlackAlpha += fadeStep;
+            if (Game1.fadeToBlackAlpha > 1.1f)
+            {
+                Game1.fadeToBlackAlpha = 1f;
+                Game1.nonWarpFade = false;
+                Game1.fadeIn = false;
+            }
+
+            return;
+        }
+
+        Game1.fadeToBlackAlpha -= fadeStep;
+        if (Game1.fadeToBlackAlpha < -0.1f)
+        {
+            Game1.fadeToBlackAlpha = 0f;
+            Game1.fadeToBlack = false;
+            Game1.nonWarpFade = false;
+        }
+    }
+
+    private static string GetEventCommandContext(Event? currentEvent)
+    {
+        if (currentEvent is null)
+        {
+            return "no active event";
+        }
+
+        string[]? commands = currentEvent.eventCommands;
+        int commandIndex = currentEvent.CurrentCommand;
+        if (commands is null || commands.Length == 0)
+        {
+            return $"command {commandIndex}: no command list";
+        }
+
+        if (commandIndex < 0 || commandIndex >= commands.Length)
+        {
+            return $"command {commandIndex + 1}/{commands.Length}: out of range";
+        }
+
+        return $"command {commandIndex + 1}/{commands.Length} '{commands[commandIndex]}'";
+    }
+
+    private void LogPreviewCommand(Event currentEvent)
+    {
+        int commandIndex = currentEvent.CurrentCommand;
+        if (commandIndex == this.lastLoggedPreviewCommandIndex)
+        {
+            return;
+        }
+
+        this.lastLoggedPreviewCommandIndex = commandIndex;
+        string command = GetCurrentEventCommand(currentEvent) ?? "<out of range>";
+        this.LogPreviewMessage($"cmd {commandIndex + 1}/{currentEvent.eventCommands.Length}: {command} | {this.FormatPreviewState()}");
+    }
+
+    private void LogPreviewMessage(string message)
+    {
+#if DEBUG
+        ModEntry.Instance.Monitor.Log($"[PreviewTrace] {message}", StardewModdingAPI.LogLevel.Info);
+#endif
+    }
+
+    private string FormatPreviewState()
+    {
+        GameLocation? location = Game1.currentLocation;
+        string menu = Game1.activeClickableMenu is null
+            ? "null"
+            : ReferenceEquals(Game1.activeClickableMenu, this)
+                ? "CutsceneEditorMenu"
+                : Game1.activeClickableMenu.GetType().Name;
+
+        return string.Join(
+            " ",
+            $"loc={this.FormatLocation(location)}",
+            $"viewport={FormatViewport(Game1.viewport)}",
+            $"fade(global={Game1.globalFade},toBlack={Game1.fadeToBlack},in={Game1.fadeIn},nonWarp={Game1.nonWarpFade},alpha={Game1.fadeToBlackAlpha:0.###},speed={Game1.globalFadeSpeed:0.###})",
+            $"bg={FormatColor(Game1.bgColor)}",
+            $"ambient={FormatColor(Game1.ambientLight)}",
+            $"eventUp={Game1.eventUp}",
+            $"eventOver={Game1.eventOver}",
+            $"dialogueUp={Game1.dialogueUp}",
+            $"messagePause={Game1.messagePause}",
+            $"pauseTime={Game1.pauseTime:0.##}",
+            $"activeMenu={menu}",
+            $"boot={this.FormatLocation(this.state.BootstrappedMap)}"
+        );
+    }
+
+    private string FormatLocation(GameLocation? location)
+    {
+        if (location is null)
+        {
+            return "null";
+        }
+
+        int width = location.Map?.DisplayWidth ?? 0;
+        int height = location.Map?.DisplayHeight ?? 0;
+        return $"{location.NameOrUniqueName}({width}x{height})";
+    }
+
+    private static string FormatTileSheets(GameLocation location)
+    {
+        if (location.Map?.TileSheets is null || location.Map.TileSheets.Count == 0)
+        {
+            return "none";
+        }
+
+        return string.Join(
+            ";",
+            location.Map.TileSheets
+                .Cast<xTile.Tiles.TileSheet>()
+                .Take(8)
+                .Select(tileSheet => $"{tileSheet.Id}:{tileSheet.ImageSource}")
+        );
+    }
+
+    private static string FormatViewport(xTile.Dimensions.Rectangle viewport)
+    {
+        return $"{viewport.X},{viewport.Y},{viewport.Width}x{viewport.Height}";
+    }
+
+    private static string FormatColor(Color color)
+    {
+        return $"{color.R},{color.G},{color.B},{color.A}";
     }
 
     private bool HasActivePlaybackEmote(Event currentEvent)
     {
         if (Game1.player?.IsEmoting == true)
-        {
-            return true;
-        }
-
-        if (this.state.PreviewEmotes.Count > 0)
         {
             return true;
         }
@@ -988,75 +1806,56 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         player.updateMovementAnimation(time);
     }
 
-    private void RegisterPreviewEmotes(Event currentEvent, int startCommand, int endCommand)
+    private void CapturePlaybackMenu()
     {
-        if (endCommand <= startCommand)
+        if (Game1.activeClickableMenu is not null && !ReferenceEquals(Game1.activeClickableMenu, this))
         {
-            return;
-        }
-
-        int start = Math.Max(0, startCommand);
-        int end = Math.Min(endCommand, currentEvent.eventCommands.Length);
-        for (int index = start; index < end; index++)
-        {
-            if (!this.registeredPreviewEmoteCommands.Add(index))
+            this.playbackMenu = Game1.activeClickableMenu;
+            string menuType = this.playbackMenu.GetType().FullName ?? this.playbackMenu.GetType().Name;
+            if (!menuType.Equals(this.lastLoggedPlaybackMenuType, StringComparison.Ordinal))
             {
-                continue;
-            }
-
-            this.TryRegisterPreviewEmote(currentEvent.eventCommands[index]);
-        }
-    }
-
-    private void TryRegisterPreviewEmote(string rawCommand)
-    {
-        List<string> parts = QuoteAwareSplit.Split(rawCommand, ' ')
-            .Where(part => !string.IsNullOrWhiteSpace(part))
-            .ToList();
-
-        if (parts.Count < 3 || !parts[0].Equals("emote", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        string actorName = parts[1];
-        if (actorName.Equals("farmer", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (!int.TryParse(parts[2], out int emoteId))
-        {
-            return;
-        }
-
-        this.state.PreviewEmotes.RemoveAll(emote => emote.ActorName.Equals(actorName, StringComparison.OrdinalIgnoreCase));
-        this.state.PreviewEmotes.Add(new PreviewEmote(actorName, emoteId));
-    }
-
-    private void UpdatePreviewEmotes(GameTime time)
-    {
-        for (int index = this.state.PreviewEmotes.Count - 1; index >= 0; index--)
-        {
-            PreviewEmote emote = this.state.PreviewEmotes[index];
-            emote.Update(time);
-            if (emote.IsFinished)
-            {
-                this.state.PreviewEmotes.RemoveAt(index);
+                this.lastLoggedPlaybackMenuType = menuType;
+                this.LogPreviewMessage($"captured menu type={menuType} state={this.FormatPreviewState()}");
             }
         }
-    }
 
-    private void CapturePlaybackDialogue()
-    {
-        if (Game1.activeClickableMenu is DialogueBox dialogueBox)
+        // Clear playbackMenu when the captured menu is no longer active (was dismissed).
+        // For speak commands: DialogueBox.closeDialogue() sets Game1.dialogueUp = false,
+        // which causes the event to re-show the dialogue on the next Update.  We restore
+        // dialogueUp so the event detects the dismissal and advances naturally.
+        // Choice/selection menus (makeSelect, question, etc.) use their own state and are
+        // unaffected — the event processes their result regardless of dialogueUp.
+        if (this.playbackMenu is not null
+            && !ReferenceEquals(Game1.activeClickableMenu, this.playbackMenu)
+            && (Game1.activeClickableMenu is null || ReferenceEquals(Game1.activeClickableMenu, this)))
         {
-            this.playbackDialogueBox = dialogueBox;
-        }
+            if (!string.IsNullOrEmpty(this.lastLoggedPlaybackMenuType))
+            {
+                this.LogPreviewMessage($"cleared menu type={this.lastLoggedPlaybackMenuType} state={this.FormatPreviewState()}");
+                this.lastLoggedPlaybackMenuType = string.Empty;
+            }
 
-        if (!Game1.dialogueUp)
-        {
-            this.playbackDialogueBox = null;
+            this.playbackMenu = null;
+            // Speak commands show dialogue but don't advance CurrentCommand until the
+            // dialogue is dismissed.  DialogueBox.closeDialogue() sets dialogueUp=false
+            // and activeClickableMenu=null, which makes the event re-show the dialogue
+            // on the next Update.  Since our capture/containment already consumed the
+            // dismissal, we advance past the speak command ourselves.
+            // Other blocking commands (makeSelect, question) manage their own advancement
+            // and are left alone.
+            Event? evt = this.state.BootstrappedMap?.currentEvent;
+            if (evt is not null && evt.CurrentCommand < evt.eventCommands.Length)
+            {
+                string raw = evt.eventCommands[evt.CurrentCommand];
+                string cmdWord = QuoteAwareSplit.Split(raw, ' ')
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p.Trim())
+                    .FirstOrDefault() ?? string.Empty;
+                if (cmdWord.Equals("speak", StringComparison.OrdinalIgnoreCase))
+                {
+                    evt.CurrentCommand++;
+                }
+            }
         }
 
         if (this.state.Mode == EditorMode.Play)
@@ -1067,26 +1866,26 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
     private void UpdatePlaybackDialogue(GameTime time)
     {
-        if (this.state.Mode != EditorMode.Play || this.playbackDialogueBox is not DialogueBox)
+        if (this.state.Mode != EditorMode.Play || this.playbackMenu is null)
         {
-            this.playbackDialogueBox?.update(time);
+            this.playbackMenu?.update(time);
             return;
         }
 
-        this.RouteInputToPlaybackDialogue(dialogueBox => dialogueBox.update(time));
+        this.RouteInputToPlaybackMenu(menu => menu.update(time));
     }
 
-    private void RouteInputToPlaybackDialogue(Action<IClickableMenu> action)
+    private void RouteInputToPlaybackMenu(Action<IClickableMenu> action)
     {
-        IClickableMenu? dialogueBox = this.playbackDialogueBox;
-        if (dialogueBox is null)
+        IClickableMenu? menu = this.playbackMenu;
+        if (menu is null)
         {
             return;
         }
 
-        Game1.activeClickableMenu = dialogueBox;
-        action(dialogueBox);
-        this.CapturePlaybackDialogue();
+        Game1.activeClickableMenu = menu;
+        action(menu);
+        this.CapturePlaybackMenu();
     }
 
     private void RequestClose()
@@ -1243,6 +2042,19 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
         this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 96, 38), this.state.Mode == EditorMode.Play ? "Stop" : "Play", this.TogglePlayback);
         nextX += 108;
+
+        if (this.state.Mode == EditorMode.Edit)
+        {
+            this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 72, 38), ">>", this.FastTrack);
+            nextX += 84;
+
+            if (this.state.CommandMarkerIndex > -1)
+            {
+                this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 72, 38), "Reset", this.ResetMarker);
+                nextX += 84;
+            }
+        }
+
         this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 108, 38), "Import", this.OpenImportDialog);
         nextX += 120;
         this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 96, 38), "Save", this.OpenSaveDialog);

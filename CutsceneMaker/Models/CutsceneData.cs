@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Newtonsoft.Json;
 
 namespace CutsceneMaker.Models;
 
@@ -22,16 +23,31 @@ public sealed class CutsceneData
 
     public bool Skippable { get; set; } = true;
 
+    public bool IncludeFarmer { get; set; } = true;
+
     public NpcPlacement FarmerPlacement { get; set; } = NpcPlacement.CreateFarmerDefault();
 
     public List<NpcPlacement> Actors { get; set; } = new();
 
     public List<object> Commands { get; set; } = new()
     {
-        TimelineCommand.CreateEnd()
+        new EventCommandBlock
+        {
+            ProviderModId = "StardewValley",
+            ProviderName = "Vanilla",
+            CommandId = "vanilla.end",
+            DisplayName = "End",
+            Values = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["mode"] = string.Empty
+            }
+        }
     };
 
-    public List<PreconditionData> Triggers { get; set; } = new();
+    public List<EventPreconditionBlock> Triggers { get; set; } = new();
+
+    [JsonIgnore]
+    public ImportedContentPackContext? ImportContext { get; set; }
 
     public static CutsceneData CreateBlank()
     {

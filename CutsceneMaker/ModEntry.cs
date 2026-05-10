@@ -1,6 +1,8 @@
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
+using CutsceneMaker.Commands;
 using CutsceneMaker.Compiler;
+using CutsceneMaker.Editor;
 using CutsceneMaker.Importer;
 using CutsceneMaker.Models;
 using Microsoft.Xna.Framework;
@@ -23,11 +25,15 @@ public sealed class ModEntry : Mod
     public static List<string> KnownNpcNames { get; } = new();
     public static Dictionary<string, string> KnownNpcSpriteAssets { get; } = new(StringComparer.OrdinalIgnoreCase);
     public static Dictionary<string, Point> KnownNpcSpriteSizes { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public EventCommandCatalog CommandCatalog { get; private set; } = EventCommandCatalog.Empty;
+    public EventPreconditionCatalog PreconditionCatalog { get; } = new();
     public string ModsDirectoryPath { get; private set; } = string.Empty;
     private TitleMenuButtonController titleMenuButton = null!;
     private Dictionary<string, ModFarmType>? cachedContentPatcherFarmTypes;
     private Dictionary<string, PreviewMapOverride>? cachedContentPatcherPreviewMapOverrides;
+    private readonly Dictionary<string, PreviewMapOverride> importedPreviewMapOverrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> previewTextureSources = new(StringComparer.OrdinalIgnoreCase);
+    private bool importedPreviewMapAssetRequestsEnabled;
 
     public override void Entry(IModHelper helper)
     {
@@ -36,6 +42,7 @@ public sealed class ModEntry : Mod
         this.titleMenuButton = new TitleMenuButtonController(helper);
         helper.Events.Content.AssetRequested += this.OnAssetRequested;
         helper.Events.GameLoop.GameLaunched += this.OnGameLaunched;
+        this.RefreshCommandCatalog();
 
 #if DEBUG
         this.RunCompilerSmokeTest();
@@ -44,6 +51,7 @@ public sealed class ModEntry : Mod
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
     {
+        this.RefreshCommandCatalog();
         this.RefreshKnownLocations();
         this.RefreshKnownNpcs();
 
@@ -56,6 +64,11 @@ public sealed class ModEntry : Mod
         );
     }
 
+    public void RefreshCommandCatalog()
+    {
+        this.CommandCatalog = EventCommandCatalog.Build(this.Helper.ModRegistry);
+    }
+
     public void RefreshKnownLocations()
     {
         try
@@ -64,6 +77,7 @@ public sealed class ModEntry : Mod
             Dictionary<string, ModFarmType> farmTypes = this.LoadAdditionalFarms();
             Dictionary<string, PreviewMapOverride> previewMapOverrides = this.GetContentPatcherPreviewMapOverrides();
             LocationBootstrapper.RebuildCatalog(this.Helper, locationData, farmTypes, previewMapOverrides);
+            LocationBootstrapper.RegisterPreviewMapOverrides(this.importedPreviewMapOverrides.Values);
         }
         catch (Exception ex)
         {
@@ -71,11 +85,41 @@ public sealed class ModEntry : Mod
         }
     }
 
+    public void RegisterImportedPreviewMapOverrides(IEnumerable<PreviewMapOverride> previewMapOverrides)
+    {
+        ArgumentNullException.ThrowIfNull(previewMapOverrides);
+
+        foreach (PreviewMapOverride preview in previewMapOverrides)
+        {
+            if (string.IsNullOrWhiteSpace(preview.TargetMapPath) || string.IsNullOrWhiteSpace(preview.SourceFilePath))
+            {
+                continue;
+            }
+
+            this.importedPreviewMapOverrides[preview.TargetMapPath] = preview;
+        }
+
+        LocationBootstrapper.RegisterPreviewMapOverrides(this.importedPreviewMapOverrides.Values);
+    }
+
+    public void SetImportedPreviewMapAssetRequestsEnabled(bool enabled)
+    {
+        this.importedPreviewMapAssetRequestsEnabled = enabled;
+    }
+
     private void OnAssetRequested(object? sender, AssetRequestedEventArgs e)
     {
-        PreviewMapOverride? preview = this.GetContentPatcherPreviewMapOverrides()
-            .Values
+        PreviewMapOverride? preview = this.GetAllPreviewMapOverrides()
             .FirstOrDefault(entry => e.NameWithoutLocale.IsEquivalentTo(entry.PreviewAssetPath));
+
+        if (preview is null)
+        {
+            preview = this.importedPreviewMapAssetRequestsEnabled
+                ? this.importedPreviewMapOverrides
+                    .Values
+                    .FirstOrDefault(entry => e.NameWithoutLocale.IsEquivalentTo(entry.TargetMapPath))
+                : null;
+        }
 
         if (preview is null)
         {
@@ -93,8 +137,7 @@ public sealed class ModEntry : Mod
                         using FileStream stream = File.OpenRead(texturePath);
                         return Texture2D.FromStream(Game1.graphics.GraphicsDevice, stream);
                     },
-                    priority: AssetLoadPriority.Exclusive,
-                    onBehalfOf: this.ModManifest.UniqueID
+                    priority: AssetLoadPriority.Exclusive
                 );
             }
 
@@ -109,8 +152,7 @@ public sealed class ModEntry : Mod
 
         e.LoadFrom(
             load: () => this.LoadPreviewMap(preview),
-            priority: AssetLoadPriority.Exclusive,
-            onBehalfOf: this.ModManifest.UniqueID
+            priority: AssetLoadPriority.Exclusive
         );
     }
 
@@ -119,6 +161,19 @@ public sealed class ModEntry : Mod
         Map map = FormatManager.Instance.LoadMap(preview.SourceFilePath);
         this.NormalizePreviewMapTileSheets(map, preview);
         return map;
+    }
+
+    private IEnumerable<PreviewMapOverride> GetAllPreviewMapOverrides()
+    {
+        foreach (PreviewMapOverride preview in this.GetContentPatcherPreviewMapOverrides().Values)
+        {
+            yield return preview;
+        }
+
+        foreach (PreviewMapOverride preview in this.importedPreviewMapOverrides.Values)
+        {
+            yield return preview;
+        }
     }
 
     private void NormalizePreviewMapTileSheets(Map map, PreviewMapOverride preview)
@@ -622,21 +677,20 @@ public sealed class ModEntry : Mod
             TileY = 12,
             Facing = 3
         });
-        sample.Triggers.Add(new PreconditionData
-        {
-            Type = PreconditionType.Season,
-            Season = "Spring"
-        });
-        sample.Commands.Insert(0, new TimelineCommand
-        {
-            Type = CommandType.Speak,
-            ActorName = "Penny",
-            DialogueText = "This is a Cutscene Maker compiler test.$h"
-        });
+        EventPreconditionBlock season = this.PreconditionCatalog.Definitions.First(definition => definition.Verb == "Season").CreateDefaultBlock();
+        season.Values["seasons"] = "Spring";
+        sample.Triggers.Add(season);
+
+        EventCommandBlock speak = this.CommandCatalog.TryGetById("vanilla.speak", out EventCommandDefinition? speakDefinition)
+            ? speakDefinition.CreateDefaultBlock()
+            : VanillaEventCommandProvider.GetDefinitions().First(definition => definition.Id == "vanilla.speak").CreateDefaultBlock();
+        speak.Values["actor"] = "Penny";
+        speak.Values["text"] = "This is a Cutscene Maker compiler test.$h";
+        sample.Commands.Insert(0, speak);
 
         this.Monitor.Log("Cutscene Maker compiler smoke test:", LogLevel.Debug);
         this.Monitor.Log("Key: " + EventKeyBuilder.Build(sample), LogLevel.Debug);
-        this.Monitor.Log("Script: " + EventScriptBuilder.Build(sample), LogLevel.Debug);
+        this.Monitor.Log("Script: " + EventScriptBuilder.Build(sample, this.CommandCatalog), LogLevel.Debug);
 
         List<string> split = QuoteAwareSplit.Split("none/-100 -100/speak Penny \"hello / still dialogue\"/end", '/');
         this.Monitor.Log("Quote-aware split sample parts: " + split.Count, LogLevel.Debug);

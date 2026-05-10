@@ -13,16 +13,22 @@ namespace CutsceneMaker.Editor;
 public sealed class MapViewPanel : EditorPanel
 {
     private static readonly Point DefaultSpriteSize = new(16, 32);
+    private const float MinimumZoom = 0.5f;
+    private const float MaximumZoom = 1.5f;
+    private const float ZoomStep = 0.25f;
 
     private readonly EditorState state;
     private readonly Dictionary<string, Texture2D?> actorTextures = new(StringComparer.OrdinalIgnoreCase);
     private Vector2 panPixels = Vector2.Zero;
+    private float zoomScale = 1f;
     private bool isPanning;
     private Point lastPanCursor;
     private bool loggedMapDrawFailure;
     private RenderTarget2D? mapRenderTarget;
     private NpcPlacement? draggedActor;
     private GameLocation? lastDrawnLocation;
+    private Microsoft.Xna.Framework.Rectangle zoomOutBounds;
+    private Microsoft.Xna.Framework.Rectangle zoomInBounds;
 
     public MapViewPanel(EditorState state)
         : base("Map View")
@@ -33,6 +39,7 @@ public sealed class MapViewPanel : EditorPanel
     public override void Draw(SpriteBatch spriteBatch)
     {
         base.Draw(spriteBatch);
+        this.DrawZoomControls(spriteBatch);
 
         Microsoft.Xna.Framework.Rectangle contentBounds = this.GetContentBounds();
 
@@ -54,17 +61,27 @@ public sealed class MapViewPanel : EditorPanel
         }
 
         this.DrawMapToRenderTarget(spriteBatch, contentBounds);
-        if (this.state.Mode == EditorMode.Play)
-        {
-            this.DrawPreviewEmotes(spriteBatch, contentBounds);
-        }
-
         this.DrawCursorTile(spriteBatch, contentBounds);
         this.DrawPlaybackFadeOverlay(spriteBatch, contentBounds);
     }
 
     public override void ReceiveLeftClick(int x, int y)
     {
+        if (this.state.Mode != EditorMode.Play)
+        {
+            if (this.zoomOutBounds.Contains(x, y))
+            {
+                this.ChangeZoom(-ZoomStep);
+                return;
+            }
+
+            if (this.zoomInBounds.Contains(x, y))
+            {
+                this.ChangeZoom(ZoomStep);
+                return;
+            }
+        }
+
         Microsoft.Xna.Framework.Rectangle contentBounds = this.GetContentBounds();
         if (!contentBounds.Contains(x, y))
         {
@@ -79,18 +96,15 @@ public sealed class MapViewPanel : EditorPanel
         Point tile = this.ScreenToTile(contentBounds, x, y);
         if (this.state.SelectedCommandIndex == -1)
         {
-            this.state.Cutscene.FarmerPlacement.TileX = tile.X;
-            this.state.Cutscene.FarmerPlacement.TileY = tile.Y;
-            this.state.IsDirty = true;
+            this.MoveSelectedSetupActor(tile);
             return;
         }
 
         if (this.state.SelectedCommandIndex >= 0
             && this.state.SelectedCommandIndex < this.state.Cutscene.Commands.Count
-            && this.state.Cutscene.Commands[this.state.SelectedCommandIndex] is TimelineCommand { Type: CommandType.Move } command)
+            && this.state.Cutscene.Commands[this.state.SelectedCommandIndex] is EventCommandBlock command
+            && this.TryFillSelectedCommandTile(command, tile))
         {
-            command.TileX = tile.X;
-            command.TileY = tile.Y;
             this.state.IsDirty = true;
         }
     }
@@ -137,7 +151,7 @@ public sealed class MapViewPanel : EditorPanel
             return;
         }
 
-        this.panPixels -= new Vector2(delta.X, delta.Y);
+        this.panPixels -= new Vector2(delta.X, delta.Y) / this.GetEffectiveZoom();
         this.lastPanCursor = cursor;
     }
 
@@ -151,12 +165,7 @@ public sealed class MapViewPanel : EditorPanel
         try
         {
             Game1.currentLocation = location;
-            Game1.viewport = new xTile.Dimensions.Rectangle(
-                (int)Math.Round(this.panPixels.X),
-                (int)Math.Round(this.panPixels.Y),
-                contentBounds.Width,
-                contentBounds.Height
-            );
+            Game1.viewport = this.GetDrawViewport(contentBounds);
 
             sceneStarted = this.TryBeginMapScene(spriteBatch);
             this.DrawMapLayers(location.backgroundLayers, sortBaseOffset: -1f);
@@ -194,58 +203,6 @@ public sealed class MapViewPanel : EditorPanel
 
             Game1.viewport = previousViewport;
             Game1.currentLocation = previousLocation;
-        }
-    }
-
-    private void DrawPreviewEmotes(SpriteBatch spriteBatch, Microsoft.Xna.Framework.Rectangle contentBounds)
-    {
-        Event? currentEvent = this.state.BootstrappedMap?.currentEvent;
-        if (currentEvent is null || this.state.PreviewEmotes.Count == 0)
-        {
-            return;
-        }
-
-        xTile.Dimensions.Rectangle viewport = new(
-            (int)Math.Round(this.panPixels.X),
-            (int)Math.Round(this.panPixels.Y),
-            contentBounds.Width,
-            contentBounds.Height
-        );
-
-        foreach (PreviewEmote emote in this.state.PreviewEmotes)
-        {
-            NPC? actor = currentEvent.getActorByName(emote.ActorName);
-            Vector2? actorLocalPosition = actor?.getLocalPosition(viewport);
-            int spriteWidth = actor?.Sprite?.SourceRect.Width ?? 16;
-
-            if (actorLocalPosition is null && this.TryGetEditorActorPosition(emote.ActorName, viewport, out Vector2 editorPosition))
-            {
-                actorLocalPosition = editorPosition;
-            }
-
-            if (actorLocalPosition is null)
-            {
-                continue;
-            }
-
-            Vector2 position = new(contentBounds.X + actorLocalPosition.Value.X, contentBounds.Y + actorLocalPosition.Value.Y);
-            position.Y -= 96f;
-            position.X += spriteWidth * Game1.pixelZoom / 2f - 32f;
-
-            Microsoft.Xna.Framework.Rectangle source = new(
-                emote.Frame * 16 % Game1.emoteSpriteSheet.Width,
-                emote.Frame * 16 / Game1.emoteSpriteSheet.Width * 16,
-                16,
-                16
-            );
-
-            Microsoft.Xna.Framework.Rectangle destination = new((int)position.X, (int)position.Y, 16 * Game1.pixelZoom, 16 * Game1.pixelZoom);
-            if (!destination.Intersects(contentBounds))
-            {
-                continue;
-            }
-
-            spriteBatch.Draw(Game1.emoteSpriteSheet, position, source, Color.White, 0f, Vector2.Zero, Game1.pixelZoom, SpriteEffects.None, 1f);
         }
     }
 
@@ -290,11 +247,18 @@ public sealed class MapViewPanel : EditorPanel
         spriteBatch.End();
         graphicsDevice.SetRenderTarget(this.mapRenderTarget);
         graphicsDevice.Clear(Color.Transparent);
-        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp);
+        spriteBatch.Begin(
+            SpriteSortMode.Deferred,
+            BlendState.AlphaBlend,
+            SamplerState.PointClamp,
+            transformMatrix: Matrix.CreateScale(this.GetEffectiveZoom())
+        );
 
         try
         {
             this.DrawMap(spriteBatch, targetBounds);
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp);
             if (this.state.Mode != EditorMode.Play)
             {
                 this.DrawActorPlaceholders(spriteBatch, targetBounds);
@@ -364,7 +328,11 @@ public sealed class MapViewPanel : EditorPanel
 
     private void DrawActorPlaceholders(SpriteBatch spriteBatch, Microsoft.Xna.Framework.Rectangle contentBounds)
     {
-        this.DrawActor(spriteBatch, contentBounds, this.state.Cutscene.FarmerPlacement, Color.DodgerBlue, "Characters\\Farmer\\farmer_base", DefaultSpriteSize);
+        if (this.state.Cutscene.IncludeFarmer)
+        {
+            this.DrawActor(spriteBatch, contentBounds, this.state.Cutscene.FarmerPlacement, Color.DodgerBlue, "Characters\\Farmer\\farmer_base", DefaultSpriteSize, actorName: "farmer");
+        }
+
         foreach (NpcPlacement actor in this.state.Cutscene.Actors)
         {
             this.DrawActor(
@@ -373,7 +341,8 @@ public sealed class MapViewPanel : EditorPanel
                 actor,
                 Color.OrangeRed,
                 GetNpcSpriteAsset(actor.ActorName),
-                GetNpcSpriteSize(actor.ActorName)
+                GetNpcSpriteSize(actor.ActorName),
+                actorName: actor.ActorName
             );
         }
     }
@@ -388,9 +357,9 @@ public sealed class MapViewPanel : EditorPanel
         );
     }
 
-    private void DrawActor(SpriteBatch spriteBatch, Microsoft.Xna.Framework.Rectangle contentBounds, NpcPlacement actor, Color fallbackColor, string textureAssetName, Point sourceSize)
+    private void DrawActor(SpriteBatch spriteBatch, Microsoft.Xna.Framework.Rectangle contentBounds, NpcPlacement actor, Color fallbackColor, string textureAssetName, Point sourceSize, string? actorName = null)
     {
-        Microsoft.Xna.Framework.Rectangle bounds = this.GetActorBounds(contentBounds, actor, sourceSize);
+        Microsoft.Xna.Framework.Rectangle bounds = this.GetActorBounds(contentBounds, actor, sourceSize, actorName);
         Texture2D? texture = this.GetActorTexture(textureAssetName);
 
         if (texture is not null && texture.Width >= sourceSize.X && texture.Height >= sourceSize.Y)
@@ -428,16 +397,19 @@ public sealed class MapViewPanel : EditorPanel
         for (int i = this.state.Cutscene.Actors.Count - 1; i >= 0; i--)
         {
             NpcPlacement actor = this.state.Cutscene.Actors[i];
-            if (this.GetActorBounds(contentBounds, actor, GetNpcSpriteSize(actor.ActorName)).Contains(x, y))
+            if (this.GetActorBounds(contentBounds, actor, GetNpcSpriteSize(actor.ActorName), actor.ActorName).Contains(x, y))
             {
                 this.draggedActor = actor;
+                this.state.SelectedSetupActorSlotId = actor.ActorSlotId;
                 return true;
             }
         }
 
-        if (this.GetActorBounds(contentBounds, this.state.Cutscene.FarmerPlacement, DefaultSpriteSize).Contains(x, y))
+        if (this.state.Cutscene.IncludeFarmer
+            && this.GetActorBounds(contentBounds, this.state.Cutscene.FarmerPlacement, DefaultSpriteSize, "farmer").Contains(x, y))
         {
             this.draggedActor = this.state.Cutscene.FarmerPlacement;
+            this.state.SelectedSetupActorSlotId = this.state.Cutscene.FarmerPlacement.ActorSlotId;
             return true;
         }
 
@@ -475,16 +447,114 @@ public sealed class MapViewPanel : EditorPanel
 
         actor.TileX = tile.X;
         actor.TileY = tile.Y;
+        this.state.SelectedSetupActorSlotId = actor.ActorSlotId;
         this.state.IsDirty = true;
     }
 
-    private Microsoft.Xna.Framework.Rectangle GetActorBounds(Microsoft.Xna.Framework.Rectangle contentBounds, NpcPlacement actor, Point sourceSize)
+    private void MoveSelectedSetupActor(Point tile)
     {
-        Vector2 tileTopLeft = this.TileToScreen(contentBounds, actor.TileX, actor.TileY);
-        int width = Math.Max(1, sourceSize.X) * Game1.pixelZoom;
-        int height = Math.Max(1, sourceSize.Y) * Game1.pixelZoom;
-        int x = (int)Math.Round(tileTopLeft.X + (Game1.tileSize - width) / 2f);
-        int y = (int)Math.Round(tileTopLeft.Y + Game1.tileSize - height);
+        NpcPlacement actor = this.GetSelectedSetupActor();
+        if (!this.state.Cutscene.IncludeFarmer && ReferenceEquals(actor, this.state.Cutscene.FarmerPlacement))
+        {
+            actor = this.state.Cutscene.Actors.FirstOrDefault() ?? this.state.Cutscene.FarmerPlacement;
+        }
+
+        actor.TileX = tile.X;
+        actor.TileY = tile.Y;
+        this.state.SelectedSetupActorSlotId = actor.ActorSlotId;
+        this.state.IsDirty = true;
+    }
+
+    private bool TryFillSelectedCommandTile(EventCommandBlock command, Point tile)
+    {
+        bool changed = false;
+        if (command.Values.ContainsKey("x"))
+        {
+            command.Values["x"] = tile.X.ToString();
+            changed = true;
+        }
+
+        if (command.Values.ContainsKey("y"))
+        {
+            command.Values["y"] = tile.Y.ToString();
+            changed = true;
+        }
+
+        if (command.Values.ContainsKey("tileX"))
+        {
+            command.Values["tileX"] = tile.X.ToString();
+            changed = true;
+        }
+
+        if (command.Values.ContainsKey("tileY"))
+        {
+            command.Values["tileY"] = tile.Y.ToString();
+            changed = true;
+        }
+
+        if (command.Values.ContainsKey("targetX"))
+        {
+            command.Values["targetX"] = tile.X.ToString();
+            changed = true;
+        }
+
+        if (command.Values.ContainsKey("targetY"))
+        {
+            command.Values["targetY"] = tile.Y.ToString();
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private NpcPlacement GetSelectedSetupActor()
+    {
+        if (!string.IsNullOrWhiteSpace(this.state.SelectedSetupActorSlotId))
+        {
+            if (this.state.Cutscene.IncludeFarmer
+                && this.state.Cutscene.FarmerPlacement.ActorSlotId.Equals(this.state.SelectedSetupActorSlotId, StringComparison.Ordinal))
+            {
+                return this.state.Cutscene.FarmerPlacement;
+            }
+
+            NpcPlacement? selectedActor = this.state.Cutscene.Actors.FirstOrDefault(actor =>
+                actor.ActorSlotId.Equals(this.state.SelectedSetupActorSlotId, StringComparison.Ordinal));
+            if (selectedActor is not null)
+            {
+                return selectedActor;
+            }
+        }
+
+        if (this.state.Cutscene.Actors.Count > 0)
+        {
+            return this.state.Cutscene.Actors[^1];
+        }
+
+        return this.state.Cutscene.FarmerPlacement;
+    }
+
+    private Point GetEffectiveActorTile(NpcPlacement actor, string? actorName)
+    {
+        string nameKey = string.IsNullOrWhiteSpace(actorName) ? actor.ActorName : actorName;
+        if (!string.IsNullOrWhiteSpace(nameKey)
+            && this.state.SimulatedActorPositions.TryGetValue(nameKey, out Point simulatedTile))
+        {
+            return simulatedTile;
+        }
+
+        return new Point(actor.TileX, actor.TileY);
+    }
+
+    private Microsoft.Xna.Framework.Rectangle GetActorBounds(Microsoft.Xna.Framework.Rectangle contentBounds, NpcPlacement actor, Point sourceSize, string? actorName = null)
+    {
+        Point tile = this.GetEffectiveActorTile(actor, actorName);
+        Vector2 tileTopLeft = this.TileToScreen(contentBounds, tile.X, tile.Y);
+        float zoom = this.GetEffectiveZoom();
+        int width = Math.Max(1, (int)Math.Round(Math.Max(1, sourceSize.X) * Game1.pixelZoom * zoom));
+        int height = Math.Max(1, (int)Math.Round(Math.Max(1, sourceSize.Y) * Game1.pixelZoom * zoom));
+        float visualTileSize = Game1.tileSize * zoom;
+        int x = (int)Math.Round(tileTopLeft.X + (visualTileSize - width) / 2f);
+        int y = (int)Math.Round(tileTopLeft.Y + visualTileSize - height);
         return new Microsoft.Xna.Framework.Rectangle(x, y, width, height);
     }
 
@@ -545,17 +615,95 @@ public sealed class MapViewPanel : EditorPanel
 
     private Vector2 TileToScreen(Microsoft.Xna.Framework.Rectangle contentBounds, int tileX, int tileY)
     {
+        float zoom = this.GetEffectiveZoom();
         return new Vector2(
-            contentBounds.X + tileX * Game1.tileSize - this.panPixels.X,
-            contentBounds.Y + tileY * Game1.tileSize - this.panPixels.Y
+            contentBounds.X + (tileX * Game1.tileSize - this.panPixels.X) * zoom,
+            contentBounds.Y + (tileY * Game1.tileSize - this.panPixels.Y) * zoom
         );
     }
 
     private Point ScreenToTile(Microsoft.Xna.Framework.Rectangle contentBounds, int screenX, int screenY)
     {
-        int tileX = (int)Math.Floor((screenX - contentBounds.X + this.panPixels.X) / Game1.tileSize);
-        int tileY = (int)Math.Floor((screenY - contentBounds.Y + this.panPixels.Y) / Game1.tileSize);
+        float zoom = this.GetEffectiveZoom();
+        int tileX = (int)Math.Floor(((screenX - contentBounds.X) / zoom + this.panPixels.X) / Game1.tileSize);
+        int tileY = (int)Math.Floor(((screenY - contentBounds.Y) / zoom + this.panPixels.Y) / Game1.tileSize);
         return new Point(tileX, tileY);
+    }
+
+    private xTile.Dimensions.Rectangle GetDrawViewport(Microsoft.Xna.Framework.Rectangle contentBounds)
+    {
+        if (this.state.Mode == EditorMode.Play)
+        {
+            return new xTile.Dimensions.Rectangle(
+                Game1.viewport.X,
+                Game1.viewport.Y,
+                contentBounds.Width,
+                contentBounds.Height
+            );
+        }
+
+        float zoom = this.GetEffectiveZoom();
+        return new xTile.Dimensions.Rectangle(
+            (int)Math.Round(this.panPixels.X),
+            (int)Math.Round(this.panPixels.Y),
+            (int)Math.Ceiling(contentBounds.Width / zoom),
+            (int)Math.Ceiling(contentBounds.Height / zoom)
+        );
+    }
+
+    private float GetEffectiveZoom()
+    {
+        return this.state.Mode == EditorMode.Play ? 1f : this.zoomScale;
+    }
+
+    private void ChangeZoom(float delta)
+    {
+        float previousZoom = this.zoomScale;
+        this.zoomScale = Math.Clamp(this.zoomScale + delta, MinimumZoom, MaximumZoom);
+        if (Math.Abs(this.zoomScale - previousZoom) < 0.001f)
+        {
+            return;
+        }
+
+        // Editor zoom is view-only state; changing it should not mark the cutscene content dirty.
+    }
+
+    private void DrawZoomControls(SpriteBatch spriteBatch)
+    {
+        if (this.state.Mode == EditorMode.Play)
+        {
+            this.zoomOutBounds = Microsoft.Xna.Framework.Rectangle.Empty;
+            this.zoomInBounds = Microsoft.Xna.Framework.Rectangle.Empty;
+            return;
+        }
+
+        this.zoomOutBounds = new Microsoft.Xna.Framework.Rectangle(this.Bounds.Right - 116, this.Bounds.Y + 12, 36, 32);
+        this.zoomInBounds = new Microsoft.Xna.Framework.Rectangle(this.Bounds.Right - 42, this.Bounds.Y + 12, 36, 32);
+        this.DrawZoomButton(spriteBatch, this.zoomOutBounds, "-");
+        this.DrawZoomButton(spriteBatch, this.zoomInBounds, "+");
+
+        string label = $"{this.zoomScale:0.##}x";
+        Vector2 labelSize = Game1.smallFont.MeasureString(label);
+        Utility.drawTextWithShadow(
+            spriteBatch,
+            label,
+            Game1.smallFont,
+            new Vector2(this.Bounds.Right - 76 - labelSize.X / 2f, this.Bounds.Y + 18),
+            Game1.textColor
+        );
+    }
+
+    private void DrawZoomButton(SpriteBatch spriteBatch, Microsoft.Xna.Framework.Rectangle bounds, string label)
+    {
+        IClickableMenu.drawTextureBox(spriteBatch, bounds.X, bounds.Y, bounds.Width, bounds.Height, Color.White);
+        Vector2 labelSize = Game1.smallFont.MeasureString(label);
+        Utility.drawTextWithShadow(
+            spriteBatch,
+            label,
+            Game1.smallFont,
+            new Vector2(bounds.Center.X - labelSize.X / 2f, bounds.Center.Y - labelSize.Y / 2f),
+            Game1.textColor
+        );
     }
 
     private void DrawWarning(SpriteBatch spriteBatch, Microsoft.Xna.Framework.Rectangle contentBounds, string message)

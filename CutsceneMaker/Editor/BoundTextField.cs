@@ -91,6 +91,12 @@ internal sealed class BoundTextField
         this.textBox.Selected = true;
     }
 
+    public void CommitAndDeselect()
+    {
+        this.Commit();
+        this.textBox.Selected = false;
+    }
+
     private void Commit()
     {
         this.lastCommittedValue = this.textBox.Text;

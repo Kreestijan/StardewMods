@@ -1,29 +1,81 @@
+using CutsceneMaker.Commands;
 using CutsceneMaker.Models;
 
 namespace CutsceneMaker.Importer;
 
 public static class EventKeyParser
 {
-    public static (string UniqueId, List<PreconditionData> Triggers) Parse(string key)
+    private static readonly Dictionary<string, string> LegacyAliases = new(StringComparer.Ordinal)
+    {
+        ["*"] = "WorldState",
+        ["*l"] = "!HostOrLocalMail",
+        ["*n"] = "HostOrLocalMail",
+        ["A"] = "!ActiveDialogueEvent",
+        ["a"] = "Tile",
+        ["B"] = "SpouseBed",
+        ["b"] = "ReachedMineBottom",
+        ["C"] = "CommunityCenterOrWarehouseDone",
+        ["c"] = "FreeInventorySlots",
+        ["d"] = "!DayOfWeek",
+        ["D"] = "Dating",
+        ["g"] = "Gender",
+        ["G"] = "GameStateQuery",
+        ["F"] = "!FestivalDay",
+        ["f"] = "Friendship",
+        ["H"] = "IsHost",
+        ["h"] = "MissingPet",
+        ["Hl"] = "!HostMail",
+        ["Hn"] = "HostMail",
+        ["i"] = "HasItem",
+        ["J"] = "JojaBundlesDone",
+        ["j"] = "DaysPlayed",
+        ["k"] = "!SawEvent",
+        ["L"] = "InUpgradedHouse",
+        ["l"] = "!LocalMail",
+        ["m"] = "EarnedMoney",
+        ["M"] = "HasMoney",
+        ["N"] = "GoldenWalnuts",
+        ["n"] = "LocalMail",
+        ["O"] = "Spouse",
+        ["o"] = "!Spouse",
+        ["p"] = "NpcVisibleHere",
+        ["q"] = "ChoseDialogueAnswers",
+        ["R"] = "Roommate",
+        ["Rf"] = "!Roommate",
+        ["r"] = "Random",
+        ["S"] = "SawSecretNote",
+        ["s"] = "Shipped",
+        ["t"] = "Time",
+        ["U"] = "!UpcomingFestival",
+        ["u"] = "DayOfMonth",
+        ["v"] = "NPCVisible",
+        ["w"] = "Weather",
+        ["X"] = "!CommunityCenterOrWarehouseDone",
+        ["y"] = "Year",
+        ["z"] = "!Season"
+    };
+
+    public static (string UniqueId, List<EventPreconditionBlock> Triggers) Parse(string key, EventPreconditionCatalog? catalog = null)
     {
         if (string.IsNullOrWhiteSpace(key))
         {
             throw new ArgumentException("Event key is required.", nameof(key));
         }
 
+        catalog ??= new EventPreconditionCatalog();
         string[] parts = key.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string uniqueId = parts[0];
-        List<PreconditionData> triggers = new();
+        List<EventPreconditionBlock> triggers = new();
 
         for (int i = 1; i < parts.Length; i++)
         {
-            triggers.Add(ParsePrecondition(parts[i]));
+            triggers.Add(ParsePrecondition(parts[i], catalog));
         }
 
         return (uniqueId, triggers);
     }
 
-    private static PreconditionData ParsePrecondition(string token)
+    private static EventPreconditionBlock ParsePrecondition(string token, EventPreconditionCatalog catalog)
     {
         bool negated = token.StartsWith('!');
         if (negated)
@@ -31,84 +83,77 @@ public static class EventKeyParser
             token = token[1..].TrimStart();
         }
 
-        string[] parts = token.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string[] parts = QuoteAwareSplit.Split(token, ' ')
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
         if (parts.Length == 0)
         {
-            return new PreconditionData
+            return CreateRaw(token, negated);
+        }
+
+        string verb = parts[0];
+        if (LegacyAliases.TryGetValue(verb, out string? modernVerb))
+        {
+            if (modernVerb.StartsWith('!'))
             {
-                Type = PreconditionType.GameStateQuery,
-                Negated = negated,
-                QueryString = token
-            };
+                negated = !negated;
+                modernVerb = modernVerb[1..];
+            }
+
+            verb = modernVerb;
         }
 
-        PreconditionData data = new()
+        if (!catalog.TryGetByVerb(verb, out EventPreconditionDefinition? definition))
         {
-            Negated = negated
-        };
-
-        switch (parts[0])
-        {
-            case "t" when parts.Length >= 3 && int.TryParse(parts[1], out int start) && int.TryParse(parts[2], out int end):
-                data.Type = PreconditionType.Time;
-                data.TimeStart = start;
-                data.TimeEnd = end;
-                break;
-
-            case "z" when parts.Length >= 2:
-                data.Type = PreconditionType.Season;
-                data.Season = NormalizeTitleCase(parts[1]);
-                break;
-
-            case "w" when parts.Length >= 2:
-                data.Type = PreconditionType.Weather;
-                data.Weather = NormalizeTitleCase(parts[1]);
-                break;
-
-            case "y" when parts.Length >= 2 && int.TryParse(parts[1], out int minYear):
-                data.Type = PreconditionType.Year;
-                data.MinYear = minYear;
-                break;
-
-            case "j" when parts.Length >= 2 && int.TryParse(parts[1], out int daysPlayed):
-                data.Type = PreconditionType.DaysPlayed;
-                data.DaysPlayed = daysPlayed;
-                break;
-
-            case "f" when parts.Length >= 3 && int.TryParse(parts[2], out int friendshipPoints):
-                data.Type = PreconditionType.Friendship;
-                data.NpcName = parts[1];
-                data.HeartLevel = friendshipPoints / 250;
-                break;
-
-            case "Hn" when parts.Length >= 2:
-                data.Type = PreconditionType.HasSeenEvent;
-                data.FlagOrEventId = parts[1];
-                break;
-
-            case "h" when parts.Length >= 2:
-                data.Type = PreconditionType.HasMailFlag;
-                data.FlagOrEventId = parts[1];
-                break;
-
-            case "GAME_STATE_QUERY":
-                data.Type = PreconditionType.GameStateQuery;
-                data.QueryString = token["GAME_STATE_QUERY".Length..].TrimStart();
-                break;
-
-            default:
-                data.Type = PreconditionType.GameStateQuery;
-                data.QueryString = token;
-                break;
+            return CreateRaw(token, negated);
         }
 
-        return data;
+        EventPreconditionBlock block = definition.CreateDefaultBlock();
+        block.Negated = negated;
+        int argumentIndex = 1;
+        foreach (EventCommandParameter parameter in definition.Parameters)
+        {
+            if (argumentIndex >= parts.Length)
+            {
+                continue;
+            }
+
+            string value;
+            if (parameter.Type == EventCommandParameterType.RawArguments || parameter == definition.Parameters[^1])
+            {
+                value = string.Join(" ", parts.Skip(argumentIndex).Select(Unquote));
+                argumentIndex = parts.Length;
+            }
+            else
+            {
+                value = Unquote(parts[argumentIndex]);
+                argumentIndex++;
+            }
+
+            block.Values[parameter.Key] = value;
+        }
+
+        return block;
     }
 
-    private static string NormalizeTitleCase(string value)
+    private static EventPreconditionBlock CreateRaw(string token, bool negated)
     {
-        return value.Length == 0
-            ? value
-            : char.ToUpperInvariant(value[0]) + value[1..].ToLowerInvariant();
+        return new EventPreconditionBlock
+        {
+            PreconditionId = "raw",
+            DisplayName = "Raw Precondition",
+            Verb = token,
+            Negated = negated
+        };
+    }
+
+    private static string Unquote(string value)
+    {
+        if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+        {
+            value = value[1..^1];
+        }
+
+        return value.Replace("\\\"", "\"", StringComparison.Ordinal);
     }
 }

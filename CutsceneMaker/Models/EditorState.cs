@@ -1,3 +1,4 @@
+using Microsoft.Xna.Framework;
 using Newtonsoft.Json;
 using StardewValley;
 
@@ -25,6 +26,8 @@ public sealed class EditorState
 
     public int SelectedCommandIndex { get; set; } = -1;
 
+    public string SelectedSetupActorSlotId { get; set; } = string.Empty;
+
     public bool IsDirty { get; set; }
 
     [JsonIgnore]
@@ -36,11 +39,15 @@ public sealed class EditorState
     public int PlaybackCommandIndex { get; set; } = -1;
 
     [JsonIgnore]
-    public List<PreviewEmote> PreviewEmotes { get; } = new();
-
-    [JsonIgnore]
     public string LastSavedContentJsonPath { get; set; } = string.Empty;
 
     [JsonIgnore]
     public string SelectedLocationId { get; set; } = "Town";
+
+    /// <summary>The timeline block index where playback will start from. -1 means the setup block.</summary>
+    public int CommandMarkerIndex { get; set; } = -1;
+
+    /// <summary>Actor positions accumulated by fast-track simulation. Passed to EventScriptBuilder for play-from-marker.</summary>
+    [JsonIgnore]
+    public Dictionary<string, Point> SimulatedActorPositions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

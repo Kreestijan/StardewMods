@@ -1,39 +1,21 @@
+using CutsceneMaker.Commands;
 using CutsceneMaker.Models;
+using Microsoft.Xna.Framework;
 
 namespace CutsceneMaker.Importer;
 
 public static class EventScriptParser
 {
-    private static readonly HashSet<string> KnownCommandVerbs = new(StringComparer.Ordinal)
-    {
-        "move",
-        "speak",
-        "message",
-        "emote",
-        "pause",
-        "precisePause",
-        "globalFade",
-        "globalFadeIn",
-        "globalFadeToClear",
-        "addItem",
-        "addMoney",
-        "friendship",
-        "mail",
-        "addQuest",
-        "learnRecipe",
-        "learnCraftingRecipe",
-        "end"
-    };
-
-    public static List<object> Parse(string script, CutsceneData cutscene)
+    public static List<object> Parse(string script, CutsceneData cutscene, EventCommandCatalog? commandCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(cutscene);
+        commandCatalog ??= EventCommandCatalog.Empty;
 
         List<string> tokens = QuoteAwareSplit.Split(script, '/');
         List<object> commands = new();
-        int index = ParseHeader(tokens, cutscene);
+        int index = ParseHeader(tokens, cutscene, commandCatalog);
+        Dictionary<string, Point> actorPositions = BuildInitialActorPositions(cutscene);
 
-        Dictionary<string, (int X, int Y)> actorPositions = BuildInitialActorPositions(cutscene);
         for (; index < tokens.Count; index++)
         {
             string token = tokens[index].Trim();
@@ -42,18 +24,18 @@ public static class EventScriptParser
                 continue;
             }
 
-            commands.Add(ParseCommand(token, actorPositions));
+            commands.Add(ParseCommand(token, cutscene, commandCatalog, actorPositions));
         }
 
-        if (commands.Count == 0 || commands[^1] is not TimelineCommand { Type: CommandType.End })
+        if (commands.Count == 0 || commands[^1] is not EventCommandBlock { CommandId: "vanilla.end" })
         {
-            commands.Add(TimelineCommand.CreateEnd());
+            commands.Add(CreateVanillaEnd(commandCatalog));
         }
 
         return commands;
     }
 
-    private static int ParseHeader(List<string> tokens, CutsceneData cutscene)
+    private static int ParseHeader(List<string> tokens, CutsceneData cutscene, EventCommandCatalog commandCatalog)
     {
         if (tokens.Count == 0)
         {
@@ -61,6 +43,7 @@ public static class EventScriptParser
         }
 
         cutscene.MusicTrack = tokens[0].Trim();
+        cutscene.IncludeFarmer = false;
         if (tokens.Count >= 2)
         {
             ParseViewport(tokens[1], cutscene);
@@ -83,22 +66,21 @@ public static class EventScriptParser
         for (; index < tokens.Count; index++)
         {
             string token = tokens[index].Trim();
-            string firstWord = GetFirstWord(token);
-            if (KnownCommandVerbs.Contains(firstWord))
-            {
-                break;
-            }
-
             if (token.Equals("skippable", StringComparison.Ordinal))
             {
                 cutscene.Skippable = true;
                 continue;
             }
 
+            string firstWord = GetFirstWord(token);
+            if (commandCatalog.TryGetByVerb(firstWord, out _))
+            {
+                break;
+            }
+
             if (TryParsePlacement(token, out NpcPlacement placement))
             {
                 ApplyPlacement(cutscene, placement);
-
                 continue;
             }
 
@@ -122,162 +104,199 @@ public static class EventScriptParser
         {
             placement.ActorName = "farmer";
             cutscene.FarmerPlacement = placement;
+            cutscene.IncludeFarmer = true;
             return;
         }
 
         cutscene.Actors.Add(placement);
     }
 
-    private static Dictionary<string, (int X, int Y)> BuildInitialActorPositions(CutsceneData cutscene)
+    private static object ParseCommand(string token, CutsceneData cutscene, EventCommandCatalog commandCatalog, Dictionary<string, Point> actorPositions)
     {
-        Dictionary<string, (int X, int Y)> actorPositions = new(StringComparer.OrdinalIgnoreCase)
+        string verb = GetFirstWord(token);
+        string[] parts = QuoteAwareSplit.Split(token, ' ')
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
+
+        if (commandCatalog.TryGetByVerb(verb, out EventCommandDefinition? definition))
         {
-            ["farmer"] = (cutscene.FarmerPlacement.TileX, cutscene.FarmerPlacement.TileY)
+            return ParseEventCommand(definition, parts, token, cutscene, actorPositions);
+        }
+
+        return new RawCommandBlock
+        {
+            RawText = token
         };
+    }
+
+    private static EventCommandBlock ParseEventCommand(EventCommandDefinition definition, string[] parts, string token, CutsceneData cutscene, Dictionary<string, Point> actorPositions)
+    {
+        if (definition.Id.Equals("vanilla.move", StringComparison.Ordinal) && parts.Length >= 5)
+        {
+            return ParseMoveCommand(definition, parts, cutscene, actorPositions);
+        }
+
+        if (definition.Id.Equals("vanilla.question", StringComparison.Ordinal) && parts.Length >= 3)
+        {
+            return ParseQuestionCommand(definition, parts);
+        }
+
+        EventCommandBlock block = definition.CreateDefaultBlock();
+        int argumentIndex = 1;
+        for (int parameterIndex = 0; parameterIndex < definition.Parameters.Count; parameterIndex++)
+        {
+            EventCommandParameter parameter = definition.Parameters[parameterIndex];
+            if (argumentIndex >= parts.Length)
+            {
+                continue;
+            }
+
+            string value;
+            if (parameter.Type == EventCommandParameterType.RawArguments)
+            {
+                value = string.Join(" ", parts.Skip(argumentIndex).Select(Unquote));
+                argumentIndex = parts.Length;
+            }
+            else if (parameterIndex == definition.Parameters.Count - 1 && parameter.Type == EventCommandParameterType.Text)
+            {
+                value = string.Join(" ", parts.Skip(argumentIndex).Select(Unquote));
+                argumentIndex = parts.Length;
+            }
+            else
+            {
+                value = Unquote(parts[argumentIndex]);
+                argumentIndex++;
+            }
+
+            block.Values[parameter.Key] = value;
+            if (parameter.Type is EventCommandParameterType.Actor or EventCommandParameterType.OptionalActor)
+            {
+                string actorName = value.TrimEnd('?');
+                string? slotId = ResolveActorSlotId(cutscene, actorName);
+                if (!string.IsNullOrWhiteSpace(slotId))
+                {
+                    block.ActorSlotIds[parameter.Key] = slotId;
+                }
+            }
+        }
+
+        return block;
+    }
+
+    private static EventCommandBlock ParseQuestionCommand(EventCommandDefinition definition, string[] parts)
+    {
+        EventCommandBlock block = definition.CreateDefaultBlock();
+        int payloadIndex = 2;
+        string mode = Unquote(parts[1]);
+        if (mode.Equals("fork", StringComparison.OrdinalIgnoreCase) && parts.Length >= 4)
+        {
+            block.Values["forkAnswer"] = Unquote(parts[2]);
+            payloadIndex = 3;
+        }
+        else if (mode.StartsWith("fork", StringComparison.OrdinalIgnoreCase) && mode.Length > "fork".Length)
+        {
+            block.Values["forkAnswer"] = mode["fork".Length..];
+        }
+        else
+        {
+            block.Values["forkAnswer"] = string.Empty;
+        }
+
+        string payload = string.Join(" ", parts.Skip(payloadIndex).Select(Unquote));
+        string[] fields = payload.Split('#');
+        block.Values["question"] = fields.Length > 0 ? fields[0] : string.Empty;
+        int answerCount = Math.Max(1, fields.Length - 1);
+        block.Values["answers.count"] = answerCount.ToString();
+        for (int index = 0; index < answerCount; index++)
+        {
+            block.Values[$"answers.{index}"] = index + 1 < fields.Length ? fields[index + 1] : string.Empty;
+        }
+
+        return block;
+    }
+
+    private static EventCommandBlock ParseMoveCommand(EventCommandDefinition definition, string[] parts, CutsceneData cutscene, Dictionary<string, Point> actorPositions)
+    {
+        EventCommandBlock block = definition.CreateDefaultBlock();
+        string actorName = Unquote(parts[1]);
+        int deltaX = TryParseInt(parts[2]);
+        int deltaY = TryParseInt(parts[3]);
+        string direction = Unquote(parts[4]);
+
+        Point currentPosition = actorPositions.TryGetValue(actorName, out Point knownPosition)
+            ? knownPosition
+            : Point.Zero;
+        Point target = new(currentPosition.X + deltaX, currentPosition.Y + deltaY);
+        actorPositions[actorName] = target;
+
+        block.Values["actor"] = actorName;
+        block.Values["targetX"] = target.X.ToString();
+        block.Values["targetY"] = target.Y.ToString();
+        block.Values["direction"] = direction;
+        if (parts.Length >= 6)
+        {
+            block.Values["continue"] = Unquote(parts[5]);
+        }
+
+        string? slotId = ResolveActorSlotId(cutscene, actorName);
+        if (!string.IsNullOrWhiteSpace(slotId))
+        {
+            block.ActorSlotIds["actor"] = slotId;
+        }
+
+        return block;
+    }
+
+    private static Dictionary<string, Point> BuildInitialActorPositions(CutsceneData cutscene)
+    {
+        Dictionary<string, Point> positions = new(StringComparer.OrdinalIgnoreCase);
+        if (cutscene.IncludeFarmer)
+        {
+            positions["farmer"] = new Point(cutscene.FarmerPlacement.TileX, cutscene.FarmerPlacement.TileY);
+        }
 
         foreach (NpcPlacement actor in cutscene.Actors)
         {
             if (!string.IsNullOrWhiteSpace(actor.ActorName))
             {
-                actorPositions[actor.ActorName] = (actor.TileX, actor.TileY);
+                positions[actor.ActorName] = new Point(actor.TileX, actor.TileY);
             }
         }
 
-        return actorPositions;
+        return positions;
     }
 
-    private static object ParseCommand(string token, Dictionary<string, (int X, int Y)> actorPositions)
+    private static EventCommandBlock CreateVanillaEnd(EventCommandCatalog commandCatalog)
     {
-        string verb = GetFirstWord(token);
-        string[] parts = token.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-        switch (verb)
+        if (commandCatalog.TryGetById("vanilla.end", out EventCommandDefinition? definition))
         {
-            case "move" when parts.Length >= 5:
-                return ParseMoveCommand(parts, actorPositions);
-
-            case "speak" when parts.Length >= 3:
-                return new TimelineCommand
-                {
-                    Type = CommandType.Speak,
-                    ActorName = parts[1],
-                    DialogueText = Unquote(token[(verb.Length + parts[1].Length + 2)..].Trim())
-                };
-
-            case "message" when parts.Length >= 2:
-                return new TimelineCommand
-                {
-                    Type = CommandType.Speak,
-                    ActorName = "farmer",
-                    DialogueText = Unquote(token[verb.Length..].Trim())
-                };
-
-            case "emote" when parts.Length >= 3:
-                return new TimelineCommand
-                {
-                    Type = CommandType.Emote,
-                    ActorName = parts[1],
-                    EmoteId = TryParseInt(parts[2])
-                };
-
-            case "pause" when parts.Length >= 2:
-            case "precisePause" when parts.Length >= 2:
-                return new TimelineCommand
-                {
-                    Type = CommandType.Pause,
-                    DurationMs = TryParseInt(parts[1])
-                };
-
-            case "globalFade":
-                return new TimelineCommand { Type = CommandType.FadeOut };
-
-            case "globalFadeIn":
-            case "globalFadeToClear":
-                return new TimelineCommand { Type = CommandType.FadeIn };
-
-            case "addItem" when parts.Length >= 2:
-                return new TimelineCommand
-                {
-                    Type = CommandType.Reward,
-                    RewardType = RewardType.Item,
-                    ItemId = parts[1],
-                    Quantity = parts.Length >= 3 ? TryParseInt(parts[2]) : 1
-                };
-
-            case "addMoney" when parts.Length >= 2:
-                return new TimelineCommand
-                {
-                    Type = CommandType.Reward,
-                    RewardType = RewardType.Gold,
-                    GoldAmount = TryParseInt(parts[1])
-                };
-
-            case "friendship" when parts.Length >= 3:
-                return new TimelineCommand
-                {
-                    Type = CommandType.Reward,
-                    RewardType = RewardType.Friendship,
-                    RewardNpcName = parts[1],
-                    FriendshipAmount = TryParseInt(parts[2])
-                };
-
-            case "mail" when parts.Length >= 2:
-                return CreateIdReward(RewardType.MailFlag, parts[1]);
-
-            case "addQuest" when parts.Length >= 2:
-                return CreateIdReward(RewardType.Quest, parts[1]);
-
-            case "learnRecipe" when parts.Length >= 2:
-                return CreateIdReward(RewardType.CookingRecipe, parts[1]);
-
-            case "learnCraftingRecipe" when parts.Length >= 2:
-                return CreateIdReward(RewardType.CraftingRecipe, parts[1]);
-
-            case "end":
-                return TimelineCommand.CreateEnd();
-
-            default:
-                return new RawCommandBlock
-                {
-                    RawText = token
-                };
-        }
-    }
-
-    private static TimelineCommand ParseMoveCommand(string[] parts, Dictionary<string, (int X, int Y)> actorPositions)
-    {
-        string actorName = parts[1];
-        int? deltaX = TryParseInt(parts[2]);
-        int? deltaY = TryParseInt(parts[3]);
-        int? facing = TryParseInt(parts[4]);
-        int? targetX = deltaX;
-        int? targetY = deltaY;
-
-        if (deltaX.HasValue && deltaY.HasValue && actorPositions.TryGetValue(actorName, out (int X, int Y) currentPosition))
-        {
-            targetX = currentPosition.X + deltaX.Value;
-            targetY = currentPosition.Y + deltaY.Value;
-            actorPositions[actorName] = (targetX.Value, targetY.Value);
+            return definition.CreateDefaultBlock();
         }
 
-        return new TimelineCommand
+        return new EventCommandBlock
         {
-            Type = CommandType.Move,
-            ActorName = actorName,
-            TileX = targetX,
-            TileY = targetY,
-            Facing = facing
+            ProviderModId = VanillaEventCommandProvider.ModId,
+            ProviderName = "Vanilla",
+            CommandId = "vanilla.end",
+            DisplayName = "End",
+            Values = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["mode"] = string.Empty
+            }
         };
     }
 
-    private static TimelineCommand CreateIdReward(RewardType rewardType, string id)
+    private static string? ResolveActorSlotId(CutsceneData cutscene, string actorName)
     {
-        return new TimelineCommand
+        if (actorName.Equals("farmer", StringComparison.OrdinalIgnoreCase))
         {
-            Type = CommandType.Reward,
-            RewardType = rewardType,
-            ItemId = id
-        };
+            return cutscene.IncludeFarmer ? cutscene.FarmerPlacement.ActorSlotId : null;
+        }
+
+        List<NpcPlacement> matches = cutscene.Actors
+            .Where(actor => actor.ActorName.Equals(actorName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return matches.Count == 1 ? matches[0].ActorSlotId : null;
     }
 
     private static void ParseViewport(string token, CutsceneData cutscene)
@@ -351,13 +370,6 @@ public static class EventScriptParser
             : token[..separatorIndex];
     }
 
-    private static int? TryParseInt(string value)
-    {
-        return int.TryParse(value, out int result)
-            ? result
-            : null;
-    }
-
     private static string Unquote(string value)
     {
         if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
@@ -366,5 +378,12 @@ public static class EventScriptParser
         }
 
         return value.Replace("\\\"", "\"", StringComparison.Ordinal);
+    }
+
+    private static int TryParseInt(string value)
+    {
+        return int.TryParse(value, out int result)
+            ? result
+            : 0;
     }
 }

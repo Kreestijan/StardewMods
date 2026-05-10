@@ -1,3 +1,4 @@
+using CutsceneMaker.Commands;
 using CutsceneMaker.Models;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -10,16 +11,13 @@ namespace CutsceneMaker.Editor;
 
 public sealed class PreconditionEditorPanel
 {
-    private const int PanelWidth = 860;
-    private const int PanelHeight = 560;
+    private const int PanelWidth = 920;
+    private const int PanelHeight = 600;
     private const int RowHeight = 42;
     private const int ButtonHeight = 36;
 
-    private static readonly PreconditionType[] AddableTypes = Enum.GetValues<PreconditionType>();
-    private static readonly string[] Seasons = { "Spring", "Summer", "Fall", "Winter" };
-    private static readonly string[] Weathers = { "Sun", "rain", "snow", "wind", "storm" };
-
     private readonly EditorState state;
+    private readonly EventPreconditionCatalog catalog;
     private readonly Action close;
     private readonly string originalTriggersJson;
     private readonly bool originalIsDirty;
@@ -28,9 +26,10 @@ public sealed class PreconditionEditorPanel
     private bool addMenuOpen;
     private int selectedIndex;
 
-    public PreconditionEditorPanel(EditorState state, Action close)
+    public PreconditionEditorPanel(EditorState state, EventPreconditionCatalog catalog, Action close)
     {
         this.state = state;
+        this.catalog = catalog;
         this.close = close;
         this.originalTriggersJson = JsonConvert.SerializeObject(state.Cutscene.Triggers);
         this.originalIsDirty = state.IsDirty;
@@ -137,12 +136,12 @@ public sealed class PreconditionEditorPanel
 
     private void DrawConditionRow(SpriteBatch spriteBatch, int index, Rectangle bounds)
     {
-        PreconditionData condition = this.state.Cutscene.Triggers[index];
+        EventPreconditionBlock condition = this.state.Cutscene.Triggers[index];
         Color color = index == this.selectedIndex ? Color.LightGoldenrodYellow : Color.White;
         IClickableMenu.drawTextureBox(spriteBatch, bounds.X, bounds.Y, bounds.Width, bounds.Height, color);
 
         string prefix = condition.Negated ? "! " : string.Empty;
-        this.DrawLine(spriteBatch, $"{prefix}{condition.Type}: {this.GetSummary(condition)}", bounds.X + 12, bounds.Y + 8);
+        this.DrawLine(spriteBatch, $"{prefix}{condition.DisplayName}: {this.GetSummary(condition)}", bounds.X + 12, bounds.Y + 8);
         this.buttons.Add((new Rectangle(bounds.X, bounds.Y, bounds.Width - 244, bounds.Height), () => this.selectedIndex = index, null));
 
         this.DrawButton(spriteBatch, new Rectangle(bounds.Right - 238, bounds.Y + 4, 86, ButtonHeight), "Neg", () => this.ToggleNegated(condition));
@@ -158,73 +157,72 @@ public sealed class PreconditionEditorPanel
             return;
         }
 
-        PreconditionData condition = this.state.Cutscene.Triggers[this.selectedIndex];
-        IClickableMenu.drawTextureBox(spriteBatch, x, y, width, 126, Color.White);
+        EventPreconditionBlock condition = this.state.Cutscene.Triggers[this.selectedIndex];
+        IClickableMenu.drawTextureBox(spriteBatch, x, y, width, 150, Color.White);
         int contentX = x + 18;
         int contentY = y + 18;
-        this.DrawLine(spriteBatch, $"Editing: {condition.Type}", contentX, contentY);
+        this.DrawLine(spriteBatch, $"Editing: {condition.DisplayName}", contentX, contentY);
 
-        switch (condition.Type)
+        if (!this.catalog.TryGetById(condition.PreconditionId, out EventPreconditionDefinition? definition))
         {
-            case PreconditionType.Time:
-                this.DrawLine(spriteBatch, "Start", contentX, contentY + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.selectedIndex}.time.start", new Rectangle(contentX + 72, contentY + RowHeight - 8, 90, 40), () => condition.TimeStart ?? 600, value => condition.TimeStart = Math.Clamp(value, 600, 2600));
-                this.DrawLine(spriteBatch, "End", contentX + 190, contentY + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.selectedIndex}.time.end", new Rectangle(contentX + 248, contentY + RowHeight - 8, 90, 40), () => condition.TimeEnd ?? 2600, value => condition.TimeEnd = Math.Clamp(value, 600, 2600));
-                break;
+            this.DrawLine(spriteBatch, "Raw", contentX, contentY + RowHeight);
+            this.DrawStringField(spriteBatch, $"{this.selectedIndex}.raw", new Rectangle(contentX + 64, contentY + RowHeight - 8, Math.Max(300, width - 120), 40), () => condition.Verb, value => condition.Verb = value, 300);
+            return;
+        }
 
-            case PreconditionType.Season:
-                this.DrawButton(spriteBatch, new Rectangle(contentX, contentY + RowHeight, 140, ButtonHeight), condition.Season ?? "Spring", () => this.CycleString(value => condition.Season = value, condition.Season, Seasons, 1), () => this.CycleString(value => condition.Season = value, condition.Season, Seasons, -1));
-                break;
+        int row = 1;
+        foreach (EventCommandParameter parameter in definition.Parameters)
+        {
+            int currentY = contentY + RowHeight * row;
+            this.DrawLine(spriteBatch, parameter.Label, contentX, currentY);
+            switch (parameter.Type)
+            {
+                case EventCommandParameterType.Boolean:
+                    this.DrawButton(spriteBatch, new Rectangle(contentX + 150, currentY - 8, 120, ButtonHeight), this.GetValue(condition, parameter), () => this.CycleBoolean(condition, parameter));
+                    break;
 
-            case PreconditionType.Weather:
-                this.DrawButton(spriteBatch, new Rectangle(contentX, contentY + RowHeight, 140, ButtonHeight), condition.Weather ?? "Sun", () => this.CycleString(value => condition.Weather = value, condition.Weather, Weathers, 1), () => this.CycleString(value => condition.Weather = value, condition.Weather, Weathers, -1));
-                break;
+                case EventCommandParameterType.Choice:
+                    this.DrawButton(spriteBatch, new Rectangle(contentX + 150, currentY - 8, 160, ButtonHeight), this.GetValue(condition, parameter), () => this.CycleChoice(condition, parameter, 1), () => this.CycleChoice(condition, parameter, -1));
+                    break;
 
-            case PreconditionType.Year:
-                this.DrawLine(spriteBatch, "Min year", contentX, contentY + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.selectedIndex}.year", new Rectangle(contentX + 112, contentY + RowHeight - 8, 90, 40), () => condition.MinYear ?? 1, value => condition.MinYear = Math.Max(1, value));
-                break;
+                case EventCommandParameterType.Actor:
+                case EventCommandParameterType.OptionalActor:
+                    this.DrawButton(spriteBatch, new Rectangle(contentX + 150, currentY - 8, 180, ButtonHeight), this.GetValue(condition, parameter), () => this.CycleNpc(condition, parameter, 1), () => this.CycleNpc(condition, parameter, -1));
+                    break;
 
-            case PreconditionType.DaysPlayed:
-                this.DrawLine(spriteBatch, "Days played", contentX, contentY + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.selectedIndex}.days", new Rectangle(contentX + 140, contentY + RowHeight - 8, 100, 40), () => condition.DaysPlayed ?? 1, value => condition.DaysPlayed = Math.Max(1, value));
-                break;
+                default:
+                    this.DrawStringField(spriteBatch, $"{this.selectedIndex}.{parameter.Key}", new Rectangle(contentX + 150, currentY - 8, Math.Max(240, width - 220), 40), () => this.GetValue(condition, parameter), value => condition.Values[parameter.Key] = value, parameter.TextLimit);
+                    break;
+            }
 
-            case PreconditionType.Friendship:
-                this.DrawButton(spriteBatch, new Rectangle(contentX, contentY + RowHeight, 160, ButtonHeight), condition.NpcName ?? "Lewis", () => this.CycleNpc(condition, 1), () => this.CycleNpc(condition, -1));
-                this.DrawLine(spriteBatch, "Hearts", contentX + 184, contentY + RowHeight);
-                this.DrawIntegerField(spriteBatch, $"{this.selectedIndex}.friend.hearts", new Rectangle(contentX + 260, contentY + RowHeight - 8, 76, 40), () => condition.HeartLevel ?? 1, value => condition.HeartLevel = Math.Clamp(value, 1, 14));
+            row++;
+            if (row > 3)
+            {
+                this.DrawLine(spriteBatch, "More fields may require widening this panel later.", contentX, contentY + RowHeight * row, Color.DimGray);
                 break;
-
-            case PreconditionType.HasSeenEvent:
-            case PreconditionType.HasMailFlag:
-                this.DrawLine(spriteBatch, "ID", contentX, contentY + RowHeight);
-                this.DrawStringField(spriteBatch, $"{this.selectedIndex}.flag", new Rectangle(contentX + 48, contentY + RowHeight - 8, 280, 40), () => condition.FlagOrEventId ?? string.Empty, value => condition.FlagOrEventId = value, 100);
-                break;
-
-            case PreconditionType.GameStateQuery:
-                this.DrawLine(spriteBatch, "GSQ", contentX, contentY + RowHeight);
-                this.DrawStringField(spriteBatch, $"{this.selectedIndex}.gsq", new Rectangle(contentX + 56, contentY + RowHeight - 8, Math.Max(280, width - 104), 40), () => condition.QueryString ?? string.Empty, value => condition.QueryString = value, 240);
-                break;
+            }
         }
     }
 
     private void DrawAddMenu(SpriteBatch spriteBatch, Rectangle addButton)
     {
+        int rowsPerColumn = 10;
+        int menuWidth = 250;
         int x = addButton.X;
-        int y = addButton.Y - AddableTypes.Length * RowHeight;
-        foreach (PreconditionType type in AddableTypes)
+        int y = addButton.Y - rowsPerColumn * RowHeight;
+        for (int i = 0; i < this.catalog.Definitions.Count; i++)
         {
-            Rectangle bounds = new(x, y, 240, RowHeight);
-            this.DrawButton(spriteBatch, bounds, type.ToString(), () => this.AddCondition(type));
-            y += RowHeight;
+            EventPreconditionDefinition definition = this.catalog.Definitions[i];
+            int column = i / rowsPerColumn;
+            int row = i % rowsPerColumn;
+            Rectangle bounds = new(x + column * menuWidth, y + row * RowHeight, menuWidth, RowHeight);
+            this.DrawButton(spriteBatch, bounds, definition.DisplayName, () => this.AddCondition(definition));
         }
     }
 
-    private void AddCondition(PreconditionType type)
+    private void AddCondition(EventPreconditionDefinition definition)
     {
-        this.state.Cutscene.Triggers.Add(CreateDefaultCondition(type));
+        this.state.Cutscene.Triggers.Add(definition.CreateDefaultBlock());
         this.selectedIndex = this.state.Cutscene.Triggers.Count - 1;
         this.addMenuOpen = false;
         this.state.IsDirty = true;
@@ -244,21 +242,50 @@ public sealed class PreconditionEditorPanel
         this.state.IsDirty = true;
     }
 
-    private void ToggleNegated(PreconditionData condition)
+    private void ToggleNegated(EventPreconditionBlock condition)
     {
         condition.Negated = !condition.Negated;
         this.state.IsDirty = true;
     }
 
-    private void CycleType(PreconditionData condition, int direction)
+    private void CycleType(EventPreconditionBlock condition, int direction)
     {
-        int index = Array.IndexOf(AddableTypes, condition.Type);
-        condition.Type = AddableTypes[WrapIndex(index + Math.Sign(direction), AddableTypes.Length)];
-        ApplyDefaults(condition);
+        int index = Math.Max(0, this.catalog.Definitions.ToList().FindIndex(definition => definition.Id.Equals(condition.PreconditionId, StringComparison.Ordinal)));
+        EventPreconditionBlock replacement = this.catalog.Definitions[WrapIndex(index + Math.Sign(direction), this.catalog.Definitions.Count)].CreateDefaultBlock();
+        replacement.Negated = condition.Negated;
+        condition.PreconditionId = replacement.PreconditionId;
+        condition.DisplayName = replacement.DisplayName;
+        condition.Verb = replacement.Verb;
+        condition.Values = replacement.Values;
         this.state.IsDirty = true;
     }
 
-    private void CycleNpc(PreconditionData condition, int direction)
+    private string GetValue(EventPreconditionBlock condition, EventCommandParameter parameter)
+    {
+        return condition.Values.TryGetValue(parameter.Key, out string? value) ? value : parameter.DefaultValue;
+    }
+
+    private void CycleBoolean(EventPreconditionBlock condition, EventCommandParameter parameter)
+    {
+        string current = this.GetValue(condition, parameter);
+        condition.Values[parameter.Key] = current.Equals("true", StringComparison.OrdinalIgnoreCase) ? "false" : "true";
+        this.state.IsDirty = true;
+    }
+
+    private void CycleChoice(EventPreconditionBlock condition, EventCommandParameter parameter, int direction)
+    {
+        if (parameter.Choices.Count == 0)
+        {
+            return;
+        }
+
+        string current = this.GetValue(condition, parameter);
+        int index = Math.Max(0, parameter.Choices.ToList().FindIndex(value => value.Equals(current, StringComparison.OrdinalIgnoreCase)));
+        condition.Values[parameter.Key] = parameter.Choices[WrapIndex(index + Math.Sign(direction), parameter.Choices.Count)];
+        this.state.IsDirty = true;
+    }
+
+    private void CycleNpc(EventPreconditionBlock condition, EventCommandParameter parameter, int direction)
     {
         ModEntry.Instance.RefreshKnownNpcs();
         if (ModEntry.KnownNpcNames.Count == 0)
@@ -266,15 +293,9 @@ public sealed class PreconditionEditorPanel
             return;
         }
 
-        int index = Math.Max(0, ModEntry.KnownNpcNames.FindIndex(name => string.Equals(name, condition.NpcName, StringComparison.OrdinalIgnoreCase)));
-        condition.NpcName = ModEntry.KnownNpcNames[WrapIndex(index + Math.Sign(direction), ModEntry.KnownNpcNames.Count)];
-        this.state.IsDirty = true;
-    }
-
-    private void CycleString(Action<string> setValue, string? current, IReadOnlyList<string> values, int direction)
-    {
-        int index = Math.Max(0, values.ToList().FindIndex(value => string.Equals(value, current, StringComparison.OrdinalIgnoreCase)));
-        setValue(values[WrapIndex(index + Math.Sign(direction), values.Count)]);
+        string current = this.GetValue(condition, parameter);
+        int index = Math.Max(0, ModEntry.KnownNpcNames.FindIndex(value => value.Equals(current, StringComparison.OrdinalIgnoreCase)));
+        condition.Values[parameter.Key] = ModEntry.KnownNpcNames[WrapIndex(index + Math.Sign(direction), ModEntry.KnownNpcNames.Count)];
         this.state.IsDirty = true;
     }
 
@@ -285,7 +306,7 @@ public sealed class PreconditionEditorPanel
 
     private void CancelAndClose()
     {
-        this.state.Cutscene.Triggers = JsonConvert.DeserializeObject<List<PreconditionData>>(this.originalTriggersJson) ?? new List<PreconditionData>();
+        this.state.Cutscene.Triggers = JsonConvert.DeserializeObject<List<EventPreconditionBlock>>(this.originalTriggersJson) ?? new List<EventPreconditionBlock>();
         this.state.IsDirty = this.originalIsDirty;
         this.close();
     }
@@ -304,55 +325,23 @@ public sealed class PreconditionEditorPanel
         this.buttons.Add((bounds, leftClick, rightClick));
     }
 
-    private void DrawIntegerField(SpriteBatch spriteBatch, string key, Rectangle bounds, Func<int> getValue, Action<int> setValue)
-    {
-        this.DrawBoundField(
-            spriteBatch,
-            key,
-            bounds,
-            () => getValue().ToString(),
-            value =>
-            {
-                if (int.TryParse(value, out int parsed))
-                {
-                    setValue(parsed);
-                    this.state.IsDirty = true;
-                }
-            },
-            numbersOnly: true
-        );
-    }
-
     private void DrawStringField(SpriteBatch spriteBatch, string key, Rectangle bounds, Func<string> getValue, Action<string> setValue, int textLimit)
     {
-        this.DrawBoundField(
-            spriteBatch,
-            key,
-            bounds,
-            getValue,
-            value =>
-            {
-                setValue(value);
-                this.state.IsDirty = true;
-            },
-            numbersOnly: false,
-            textLimit: textLimit
-        );
-    }
-
-    private void DrawBoundField(SpriteBatch spriteBatch, string key, Rectangle bounds, Func<string> getValue, Action<string> setValue, bool numbersOnly, int textLimit = -1)
-    {
-        BoundTextField field = this.GetTextField(key, getValue, setValue, numbersOnly, textLimit);
+        BoundTextField field = this.GetTextField(key, getValue, value =>
+        {
+            setValue(value);
+            this.state.IsDirty = true;
+        }, textLimit);
         field.SetBounds(bounds);
         field.Draw(spriteBatch);
         this.buttons.Add((bounds, () => this.SelectTextField(field), null));
     }
 
-    private BoundTextField GetTextField(string key, Func<string> getValue, Action<string> setValue, bool numbersOnly, int textLimit)
+    private BoundTextField GetTextField(string key, Func<string> getValue, Action<string> setValue, int textLimit)
     {
         if (!this.textFields.TryGetValue(key, out BoundTextField? field))
         {
-            field = new BoundTextField(getValue, setValue, numbersOnly, textLimit);
+            field = new BoundTextField(getValue, setValue, numbersOnly: false, textLimit: textLimit);
             this.textFields[key] = field;
         }
 
@@ -383,69 +372,14 @@ public sealed class PreconditionEditorPanel
         Utility.drawTextWithShadow(spriteBatch, text, Game1.smallFont, new Vector2(x, y), color);
     }
 
-    private string GetSummary(PreconditionData condition)
+    private string GetSummary(EventPreconditionBlock condition)
     {
-        return condition.Type switch
+        if (condition.Values.Count == 0)
         {
-            PreconditionType.Time => $"{condition.TimeStart ?? 600}-{condition.TimeEnd ?? 2600}",
-            PreconditionType.Season => condition.Season ?? "Spring",
-            PreconditionType.Weather => condition.Weather ?? "Sun",
-            PreconditionType.Year => $"year {condition.MinYear ?? 1}+",
-            PreconditionType.DaysPlayed => $"{condition.DaysPlayed ?? 1}+ days",
-            PreconditionType.Friendship => $"{condition.NpcName ?? "Lewis"} {condition.HeartLevel ?? 1} hearts",
-            PreconditionType.HasSeenEvent => condition.FlagOrEventId ?? "event id",
-            PreconditionType.HasMailFlag => condition.FlagOrEventId ?? "mail flag",
-            PreconditionType.GameStateQuery => condition.QueryString ?? "query",
-            _ => string.Empty
-        };
-    }
-
-    private static PreconditionData CreateDefaultCondition(PreconditionType type)
-    {
-        PreconditionData condition = new() { Type = type };
-        ApplyDefaults(condition);
-        return condition;
-    }
-
-    private static void ApplyDefaults(PreconditionData condition)
-    {
-        switch (condition.Type)
-        {
-            case PreconditionType.Time:
-                condition.TimeStart ??= 600;
-                condition.TimeEnd ??= 2600;
-                break;
-
-            case PreconditionType.Season:
-                condition.Season ??= "Spring";
-                break;
-
-            case PreconditionType.Weather:
-                condition.Weather ??= "Sun";
-                break;
-
-            case PreconditionType.Year:
-                condition.MinYear ??= 1;
-                break;
-
-            case PreconditionType.DaysPlayed:
-                condition.DaysPlayed ??= 1;
-                break;
-
-            case PreconditionType.Friendship:
-                condition.NpcName ??= ModEntry.KnownNpcNames.FirstOrDefault() ?? "Lewis";
-                condition.HeartLevel ??= 1;
-                break;
-
-            case PreconditionType.HasSeenEvent:
-            case PreconditionType.HasMailFlag:
-                condition.FlagOrEventId ??= string.Empty;
-                break;
-
-            case PreconditionType.GameStateQuery:
-                condition.QueryString ??= string.Empty;
-                break;
+            return string.Empty;
         }
+
+        return string.Join(" ", condition.Values.Values.Where(value => !string.IsNullOrWhiteSpace(value)).Take(3));
     }
 
     private static int WrapIndex(int index, int count)
