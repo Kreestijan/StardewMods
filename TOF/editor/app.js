@@ -6,6 +6,8 @@ const snapshotKey = "last-source-snapshot";
 const openPickerId = "tof-fishes-json";
 const localSnapshotKey = "tof-last-source-snapshot";
 const localSnapshotNameKey = "tof-last-source-name";
+const themePreferenceKey = "tof-editor-theme";
+const customLocationsKey = "tof-custom-locations";
 const ObjectSpriteWidth = 32;
 const ObjectSpriteHeight = 32;
 const AquariumSpriteWidth = 24;
@@ -191,7 +193,8 @@ const state = {
   spriteTransformBounds: null,
   spriteTransformStartPoint: null,
   spriteRotationBasePixels: null,
-  spriteRotationStartAngle: 0
+  spriteRotationStartAngle: 0,
+  customLocations: []
 };
 
 const vanillaObjectNames = window.TOF_VANILLA_OBJECT_NAMES ?? {};
@@ -213,7 +216,45 @@ const locationLibrary = [
   { name: "Mine", source: "Vanilla", note: "Mine floors with water" },
   { name: "IslandSouth", source: "Vanilla", note: "Ginger Island south ocean" },
   { name: "IslandWest", source: "Vanilla", note: "Island west freshwater" },
-  { name: "IslandNorth", source: "Vanilla", note: "Island north river area" }
+  { name: "IslandNorth", source: "Vanilla", note: "Island north river area" },
+  { name: "Custom_AdventurerSummit", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_BlueMoonVineyard", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_CrimsonBadlands", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_DeepCave", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_DiamondCavern", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_FableReef", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_FerngillRepublicFrontier", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_ForbiddenMaze", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_ForestWest", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_GrampletonSuburbs", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_GrampletonSuburbsTrainStation", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_HenchmanBackyard", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_Highlands", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_HighlandsCavern", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_JunimoWoods", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_MorrisProperty", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_ShearwaterBridge", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "Custom_SpriteSpring2", source: "Stardew Valley Expanded", note: "SVE fish location" },
+  { name: "EastScarp_Crossing", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_DeepDark", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_DeepMountainCrossroads", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_DeepMountains", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_FairyPool", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_Orchard", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_PirateShip", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_PirateShip_SeaDate", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_PirateShipReef", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_SeaCave", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_SecretCave", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_SmugglerDen", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_UnderwaterLexi", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "EastScarp_Village", source: "East Scarp", note: "East Scarp fish location" },
+  { name: "Custom_Ridgeside_Ridge", source: "Ridgeside Village", note: "RSV fish location" },
+  { name: "Custom_Ridgeside_RidgeFalls", source: "Ridgeside Village", note: "RSV fish location" },
+  { name: "Custom_Ridgeside_RidgeForest", source: "Ridgeside Village", note: "RSV fish location" },
+  { name: "Custom_Ridgeside_RidgePond", source: "Ridgeside Village", note: "RSV fish location" },
+  { name: "Custom_Ridgeside_RidgesideVillage", source: "Ridgeside Village", note: "RSV fish location" },
+  { name: "Custom_Ridgeside_SummitFarm", source: "Ridgeside Village", note: "RSV fish location" }
 ];
 
 const presets = {
@@ -454,6 +495,10 @@ const gateTemplate = document.getElementById("gate-row-template");
 const seasonCheckboxes = [...document.querySelectorAll("[data-season]")];
 const locationLibrarySearch = document.getElementById("locationLibrarySearch");
 const locationLibraryList = document.getElementById("locationLibraryList");
+const locationSuggestions = document.getElementById("location-suggestions");
+const themeToggleButton = document.getElementById("theme-toggle");
+const addCustomLocationButton = document.getElementById("add-custom-location");
+const importLocationDataButton = document.getElementById("import-location-data");
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
 const gate4Table = document.getElementById("gate4Table");
 const gate8Table = document.getElementById("gate8Table");
@@ -551,6 +596,9 @@ $.spriteColor.addEventListener("input", renderSpritePalette);
 $.spriteColor.addEventListener("change", renderSpritePalette);
 document.getElementById("write-pack").addEventListener("click", writePackFiles);
 locationLibrarySearch.addEventListener("input", renderLocationLibrary);
+themeToggleButton.addEventListener("click", toggleTheme);
+addCustomLocationButton.addEventListener("click", addCustomLocationFromSearch);
+importLocationDataButton.addEventListener("click", importLocationDataFiles);
 presetButtons.forEach(button => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
@@ -597,8 +645,43 @@ renderContextTagButtons();
 bindPondColorFields();
 bindSpriteEditor();
 bindAquariumFields();
+initializeTheme();
+loadCustomLocations();
 
 bootstrap();
+
+function initializeTheme() {
+  const storedTheme = readStoredTheme();
+  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+  setTheme(storedTheme || (prefersDark ? "dark" : "light"), false);
+}
+
+function toggleTheme() {
+  setTheme(document.body.dataset.theme === "dark" ? "light" : "dark", true);
+}
+
+function setTheme(theme, persist) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  document.body.dataset.theme = normalized;
+  themeToggleButton.textContent = normalized === "dark" ? "Light mode" : "Dark mode";
+  themeToggleButton.setAttribute("aria-pressed", String(normalized === "dark"));
+  if (persist) {
+    try {
+      localStorage.setItem(themePreferenceKey, normalized);
+    } catch {
+      // Ignore storage quota or browser support failures.
+    }
+  }
+}
+
+function readStoredTheme() {
+  try {
+    const stored = localStorage.getItem(themePreferenceKey);
+    return stored === "dark" || stored === "light" ? stored : "";
+  } catch {
+    return "";
+  }
+}
 
 async function bootstrap() {
   const restored = await tryRestoreSourceHandle();
@@ -984,6 +1067,7 @@ function renderAll() {
   renderFishList();
   renderFishEditor();
   renderLocationLibrary();
+  renderLocationSuggestions();
   refreshOutputs();
   persistSnapshots();
 }
@@ -1129,6 +1213,10 @@ function bindRowInputs(row, item, collection, index, rerender) {
       if (field === "itemId") {
         updateItemNamePreview(row, item.itemId);
       }
+      if (field === "location") {
+        renderLocationLibrary();
+        renderLocationSuggestions();
+      }
       refreshOutputs();
     };
 
@@ -1141,6 +1229,8 @@ function bindRowInputs(row, item, collection, index, rerender) {
   row.querySelector("[data-action='remove']").addEventListener("click", () => {
     collection.splice(index, 1);
     rerender();
+    renderLocationLibrary();
+    renderLocationSuggestions();
     refreshOutputs();
   });
 }
@@ -2471,7 +2561,7 @@ function renderLocationLibrary() {
   const query = locationLibrarySearch.value.trim().toLowerCase();
   locationLibraryList.innerHTML = "";
 
-  const filtered = locationLibrary.filter(entry => {
+  const filtered = getLocationLibrary().filter(entry => {
     if (!query) {
       return true;
     }
@@ -2485,35 +2575,324 @@ function renderLocationLibrary() {
   filtered.forEach(entry => {
     const card = document.createElement("article");
     card.className = "library-item";
+    if (entry.custom) {
+      card.classList.add("custom");
+    }
+
     card.innerHTML = `
       <div class="library-meta">
         <span class="pill">${escapeHtml(entry.source)}</span>
         <span class="pill note">${escapeHtml(entry.note)}</span>
       </div>
       <h3>${escapeHtml(entry.name)}</h3>
-      <button type="button">Use location</button>
+      <div class="library-actions">
+        <button type="button" data-action="use">Use location</button>
+        ${entry.custom ? '<button type="button" data-action="forget" class="danger">Forget</button>' : ""}
+      </div>
     `;
-    card.querySelector("button").addEventListener("click", () => useLibraryLocation(entry.name));
+    card.querySelector("[data-action='use']").addEventListener("click", () => useLibraryLocation(entry.name));
+    card.querySelector("[data-action='forget']")?.addEventListener("click", () => removeCustomLocation(entry.name));
     locationLibraryList.appendChild(card);
   });
 
   if (!filtered.length) {
     const empty = document.createElement("p");
     empty.className = "section-copy";
-    empty.textContent = "No built-in matches. You can still type any exact custom internal location name manually.";
+    empty.textContent = query
+      ? "No matches. Click Add custom to save the typed internal location name, or import a Content Patcher/Data locations JSON file."
+      : "No locations available.";
     locationLibraryList.appendChild(empty);
   }
+}
+
+function getLocationLibrary() {
+  const entries = new Map();
+  const addEntry = entry => {
+    const name = normalizeLocationName(entry?.name);
+    if (!name) {
+      return;
+    }
+
+    const key = name.toLowerCase();
+    if (!entries.has(key)) {
+      entries.set(key, { ...entry, name });
+    }
+  };
+
+  locationLibrary.forEach(addEntry);
+  getCurrentSourceLocations().forEach(name => addEntry({
+    name,
+    source: "Current file",
+    note: "Already used by this fishes.json"
+  }));
+  state.customLocations.forEach(entry => addEntry(entry));
+
+  return [...entries.values()].sort((left, right) =>
+    left.source.localeCompare(right.source) || left.name.localeCompare(right.name)
+  );
+}
+
+function getCurrentSourceLocations() {
+  if (!state.source?.fish) {
+    return [];
+  }
+
+  const names = new Set();
+  state.source.fish.forEach(fish => {
+    (fish.locations ?? []).forEach(location => {
+      const name = normalizeLocationName(location?.location);
+      if (name) {
+        names.add(name);
+      }
+    });
+  });
+
+  return [...names];
+}
+
+function renderLocationSuggestions() {
+  if (!locationSuggestions) {
+    return;
+  }
+
+  locationSuggestions.innerHTML = "";
+  getLocationLibrary().forEach(entry => {
+    const option = document.createElement("option");
+    option.value = entry.name;
+    locationSuggestions.appendChild(option);
+  });
 }
 
 function useLibraryLocation(locationName) {
   if (state.activeLocationInput?.input && document.contains(state.activeLocationInput.input)) {
     state.activeLocationInput.input.value = locationName;
     state.activeLocationInput.item.location = locationName;
+    renderLocationLibrary();
+    renderLocationSuggestions();
     refreshOutputs();
     return;
   }
 
   addLocationWithName(locationName);
+}
+
+function addCustomLocationFromSearch() {
+  const name = normalizeLocationName(locationLibrarySearch.value);
+  if (!name) {
+    alert("Type an internal location name in the search field first.");
+    return;
+  }
+
+  addCustomLocations([{
+    name,
+    source: "Custom",
+    note: "Saved manually",
+    custom: true
+  }]);
+}
+
+async function importLocationDataFiles() {
+  let files = [];
+  try {
+    files = await pickJsonFiles();
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      alert(`Could not open files: ${error.message ?? error}`);
+    }
+    return;
+  }
+
+  if (!files.length) {
+    return;
+  }
+
+  const imported = [];
+  const failures = [];
+  for (const file of files) {
+    try {
+      const json = JSON.parse(await file.text());
+      const names = extractLocationNamesFromJson(json);
+      names.forEach(name => imported.push({
+        name,
+        source: "Imported",
+        note: file.name,
+        custom: true
+      }));
+    } catch (error) {
+      failures.push(`${file.name}: ${error.message ?? error}`);
+    }
+  }
+
+  const added = addCustomLocations(imported);
+  if (failures.length) {
+    alert(`Imported ${added} location(s).\n\nSome files could not be parsed:\n${failures.join("\n")}`);
+  } else if (!added) {
+    alert("No new Data/Locations entries were found in the selected file(s).");
+  }
+}
+
+async function pickJsonFiles() {
+  if (window.showOpenFilePicker) {
+    const handles = await window.showOpenFilePicker({
+      multiple: true,
+      types: [{
+        description: "JSON files",
+        accept: { "application/json": [".json"] }
+      }]
+    });
+    return Promise.all(handles.map(handle => handle.getFile()));
+  }
+
+  return new Promise(resolve => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.multiple = true;
+    input.addEventListener("change", () => resolve([...input.files]));
+    input.click();
+  });
+}
+
+function extractLocationNamesFromJson(json) {
+  const names = new Set();
+  const visit = value => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    if (isDataLocationsTarget(value.Target ?? value.Targets)) {
+      collectLocationEntryKeys(value.Entries, names);
+    }
+
+    if (looksLikeDataLocationsDictionary(value)) {
+      collectLocationEntryKeys(value, names);
+    }
+
+    Object.values(value).forEach(visit);
+  };
+
+  visit(json);
+  return [...names].sort((left, right) => left.localeCompare(right));
+}
+
+function isDataLocationsTarget(target) {
+  if (Array.isArray(target)) {
+    return target.some(isDataLocationsTarget);
+  }
+
+  return String(target ?? "").replaceAll("\\", "/").toLowerCase() === "data/locations";
+}
+
+function looksLikeDataLocationsDictionary(value) {
+  const keys = Object.keys(value);
+  if (!keys.length || keys.some(key => ["Format", "Changes", "ConfigSchema", "DynamicTokens"].includes(key))) {
+    return false;
+  }
+
+  return keys.some(key => {
+    const entry = value[key];
+    return isLikelyLocationName(key) && entry && typeof entry === "object" && (
+      "CreateOnLoad" in entry ||
+      "MapPath" in entry ||
+      "FishAreas" in entry ||
+      "ArtifactSpots" in entry ||
+      "CanPlantHere" in entry ||
+      "CanHaveGreenRainSpawns" in entry
+    );
+  });
+}
+
+function collectLocationEntryKeys(entries, names) {
+  if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+    return;
+  }
+
+  Object.keys(entries).forEach(key => {
+    const name = normalizeLocationName(key);
+    if (isLikelyLocationName(name)) {
+      names.add(name);
+    }
+  });
+}
+
+function isLikelyLocationName(name) {
+  if (!name || typeof name !== "string") {
+    return false;
+  }
+
+  return !name.includes("/") && !name.includes("\\") && !name.includes(".") && name.length <= 120;
+}
+
+function addCustomLocations(locations) {
+  const current = new Map(state.customLocations.map(entry => [entry.name.toLowerCase(), entry]));
+  let added = 0;
+  locations.forEach(entry => {
+    const name = normalizeLocationName(entry?.name);
+    if (!name) {
+      return;
+    }
+
+    const key = name.toLowerCase();
+    if (!current.has(key)) {
+      current.set(key, {
+        name,
+        source: entry.source || "Custom",
+        note: entry.note || "Saved manually",
+        custom: true
+      });
+      added += 1;
+    }
+  });
+
+  state.customLocations = [...current.values()].sort((left, right) => left.name.localeCompare(right.name));
+  saveCustomLocations();
+  renderLocationLibrary();
+  renderLocationSuggestions();
+  return added;
+}
+
+function removeCustomLocation(locationName) {
+  const name = normalizeLocationName(locationName);
+  state.customLocations = state.customLocations.filter(entry => entry.name !== name);
+  saveCustomLocations();
+  renderLocationLibrary();
+  renderLocationSuggestions();
+}
+
+function normalizeLocationName(value) {
+  return String(value ?? "").trim();
+}
+
+function loadCustomLocations() {
+  try {
+    const raw = localStorage.getItem(customLocationsKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    state.customLocations = Array.isArray(parsed)
+      ? parsed
+        .map(entry => ({
+          name: normalizeLocationName(typeof entry === "string" ? entry : entry?.name),
+          source: typeof entry === "string" ? "Custom" : entry?.source || "Custom",
+          note: typeof entry === "string" ? "Saved manually" : entry?.note || "Saved manually",
+          custom: true
+        }))
+        .filter(entry => entry.name)
+      : [];
+  } catch {
+    state.customLocations = [];
+  }
+}
+
+function saveCustomLocations() {
+  try {
+    localStorage.setItem(customLocationsKey, stringify(state.customLocations));
+  } catch {
+    // Ignore storage quota or browser support failures.
+  }
 }
 
 function applyPreset(presetKey) {
