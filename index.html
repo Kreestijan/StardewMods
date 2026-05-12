@@ -14,6 +14,7 @@
         <p>Edit <code>fishes.json</code> visually and generate the Content Patcher files.</p>
       </div>
       <div class="toolbar">
+        <button id="theme-toggle" type="button" aria-pressed="false">Dark mode</button>
         <button id="open-source">Open fishes.json</button>
         <button id="save-source">Save fishes.json</button>
         <button id="download-source">Download fishes.json</button>
@@ -268,9 +269,11 @@
         <section class="card">
           <div class="section-head">
             <h2>Location Library</h2>
-            <input id="locationLibrarySearch" class="library-search" type="search" placeholder="Search vanilla, SVE, East Scarp, RSV locations">
+            <input id="locationLibrarySearch" class="library-search" type="search" placeholder="Search vanilla, imported, or custom locations">
+            <button id="add-custom-location" type="button">Add custom</button>
+            <button id="import-location-data" type="button">Import locations</button>
           </div>
-          <p class="section-copy">Click a location to use it. If a location field is focused, the library fills that row. Otherwise it adds a new location row. Modded examples are included as helpers, but free text still works for anything not listed here.</p>
+          <p class="section-copy">Click a location to use it. If a location field is focused, the library fills that row. Otherwise it adds a new location row. The library includes vanilla helpers, imported <code>Data/Locations</code> keys, current-file locations, and any custom locations you save here.</p>
           <div id="locationLibraryList" class="library-list"></div>
         </section>
 
