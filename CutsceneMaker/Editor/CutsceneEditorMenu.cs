@@ -92,6 +92,9 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private int previewFarmerMoveFacing = 2;
     private int stuckCommandIndex = -1;
     private int stuckFrameCount;
+    // Tracks original (non-temp) locations used during playback so we can
+    // restore state when changeLocation returns to them after a temp map switch.
+    private readonly Dictionary<string, List<NPC>> playbackOriginalLocationCharacters = new(StringComparer.OrdinalIgnoreCase);
 
     public CutsceneEditorMenu()
         : base(
@@ -963,8 +966,6 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             Game1.nonWarpFade = false;
             Game1.fadeToBlackAlpha = 0f;
             Game1.pauseTime = 0f;
-            ModEntry.Instance.SetImportedPreviewMapAssetRequestsEnabled(true);
-
             string script = EventScriptBuilder.Build(
     this.state.Cutscene,
     ModEntry.Instance.CommandCatalog,
@@ -1275,34 +1276,91 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     {
         string locationName = Unquote(parts[1]);
         this.LogPreviewMessage($"handling changeLocation raw='{rawCommand}' before={this.FormatPreviewState()}");
-        LocationLoadResult loadResult = LocationBootstrapper.LoadDetailed(locationName);
-        if (loadResult.Location is null)
+
+        // Extract the pan flag (parts[2] = "true") or detect it from a backward-compat
+        // trailing " true" absorbed into the location name by the old importer
+        bool shouldPan = parts.Count >= 3
+            && bool.TryParse(Unquote(parts[2]), out bool parsedPan)
+            && parsedPan;
+
+        try
         {
-            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not handle '{rawCommand}': {loadResult.FailureReason}", StardewModdingAPI.LogLevel.Warn);
+            LocationLoadResult loadResult = LocationBootstrapper.LoadDetailed(locationName);
+
+            // Backward compatibility: old imports absorbed " true" into the location
+            // name (e.g. "Town true") because the changeLocation definition was missing
+            // the pan parameter. Strip and retry.
+            if (!loadResult.Loaded
+                && locationName.EndsWith(" true", StringComparison.OrdinalIgnoreCase)
+                && locationName.Length > 5)
+            {
+                string strippedName = locationName[..^5];
+                shouldPan = true;
+                loadResult = LocationBootstrapper.LoadDetailed(strippedName);
+                if (loadResult.Loaded)
+                {
+                    locationName = strippedName;
+                }
+            }
+
+            if (loadResult.Location is null)
+            {
+                ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not handle '{rawCommand}': {loadResult.FailureReason}", StardewModdingAPI.LogLevel.Warn);
+                return false;
+            }
+
+            Event runningEvent = Game1.currentLocation?.currentEvent ?? currentEvent;
+            GameLocation? previousLocation = Game1.currentLocation;
+            if (previousLocation is not null && !ReferenceEquals(previousLocation, loadResult.Location))
+            {
+                previousLocation.cleanupBeforePlayerExit();
+                previousLocation.currentEvent = null;
+            }
+
+            Game1.currentLightSources.Clear();
+            Game1.currentLocation = loadResult.Location;
+            loadResult.Location.resetForPlayerEntry();
+            loadResult.Location.UpdateMapSeats();
+            loadResult.Location.currentEvent = runningEvent;
+            loadResult.Location.ResetForEvent(runningEvent);
+            // Clear the temporary location field since we're leaving a temp map
+            EventTemporaryLocationField?.SetValue(runningEvent, null);
+
+            if (Game1.player is not null)
+            {
+                Game1.player.currentLocation = loadResult.Location;
+            }
+
+            runningEvent.farmer.currentLocation = loadResult.Location;
+            runningEvent.CurrentCommand++;
+
+            // Restore original characters if this is a location we previously saved
+            // before a temp map's cleanup destroyed them
+            if (this.playbackOriginalLocationCharacters.TryGetValue(locationName, out List<NPC>? savedCharacters))
+            {
+                loadResult.Location.characters.Clear();
+                foreach (NPC character in savedCharacters)
+                {
+                    loadResult.Location.characters.Add(character);
+                }
+            }
+
+            if (shouldPan)
+            {
+                Game1.panScreen(0, 0);
+            }
+
+            this.state.BootstrappedMap = loadResult.Location;
+            this.playbackLocations.Add(loadResult.Location);
+
+            this.LogPreviewMessage($"handled changeLocation raw='{rawCommand}' after={this.FormatPreviewState()} tilesheets={FormatTileSheets(loadResult.Location)}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not complete '{rawCommand}' for location '{locationName}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
             return false;
         }
-
-        GameLocation? previousLocation = Game1.currentLocation;
-        if (previousLocation is not null && !ReferenceEquals(previousLocation, loadResult.Location))
-        {
-            previousLocation.currentEvent = null;
-        }
-
-        Game1.currentLocation = loadResult.Location;
-        loadResult.Location.currentEvent = currentEvent;
-        loadResult.Location.ResetForEvent(currentEvent);
-        this.state.BootstrappedMap = loadResult.Location;
-        this.playbackLocations.Add(loadResult.Location);
-
-        if (Game1.player is not null)
-        {
-            Game1.player.currentLocation = loadResult.Location;
-        }
-
-        currentEvent.farmer.currentLocation = loadResult.Location;
-        currentEvent.CurrentCommand++;
-        this.LogPreviewMessage($"handled changeLocation raw='{rawCommand}' after={this.FormatPreviewState()} tilesheets={FormatTileSheets(loadResult.Location)}");
-        return true;
     }
 
     private bool HandlePreviewChangeToTemporaryMap(Event currentEvent, List<string> parts, string rawCommand)
@@ -1324,19 +1382,45 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
         catch
         {
-            // File path failed — try content pipeline (handles CP-provided maps)
-            string contentPath = "Maps/" + mapName;
-            try
+            // File path failed — try content pipeline. When there's a preview override
+            // (previewMapPath is our own asset namespace like Mods/Kree.CutsceneMaker/PreviewMaps/...),
+            // try it first — no Content Patcher conflict since it's our own asset.
+            // Otherwise fall back to the standard Maps/ path.
+            Map? loadedMap = null;
+            if (!previewMapPath.StartsWith("Maps/", StringComparison.OrdinalIgnoreCase))
             {
-                Map map = Game1.content.Load<Map>(contentPath);
+                try
+                {
+                    loadedMap = Game1.content.Load<Map>(previewMapPath);
+                }
+                catch
+                {
+                    // Fall through to Maps/ path below
+                }
+            }
+
+            if (loadedMap is null)
+            {
+                try
+                {
+                    loadedMap = Game1.content.Load<Map>("Maps/" + mapName);
+                }
+                catch
+                {
+                    // Both paths failed — report and bail
+                }
+            }
+
+            if (loadedMap is not null)
+            {
                 temporaryLocation = new GameLocation("Maps/Farm", "Temp");
-                temporaryLocation.map = map;
+                temporaryLocation.map = loadedMap;
                 temporaryLocation.name.Value = "Temp";
                 ModEntry.Instance.Monitor.Log($"Cutscene Maker loaded map '{mapName}' via content pipeline.", StardewModdingAPI.LogLevel.Trace);
             }
-            catch (Exception ex)
+            else
             {
-                ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not load map '{mapName}' via file '{previewMapPath}' or content '{contentPath}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
+                ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not load map '{mapName}' via file '{previewMapPath}' or content pipeline.", StardewModdingAPI.LogLevel.Warn);
                 return false;
             }
         }
@@ -1357,6 +1441,16 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         {
             Event runningEvent = Game1.currentLocation?.currentEvent ?? currentEvent;
             GameLocation? previousLocation = Game1.currentLocation;
+            if (previousLocation is not null && previousLocation.NameOrUniqueName != "Temp")
+            {
+                // Save original location characters before cleanup so we can restore
+                // them when changeLocation brings us back (Town → temp map → Town).
+                if (!this.playbackOriginalLocationCharacters.ContainsKey(previousLocation.NameOrUniqueName))
+                {
+                    this.playbackOriginalLocationCharacters[previousLocation.NameOrUniqueName] = previousLocation.characters.ToList();
+                }
+            }
+
             previousLocation?.cleanupBeforePlayerExit();
             if (previousLocation is not null)
             {
@@ -1674,6 +1768,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
 
         this.playbackLocations.Clear();
+        this.playbackOriginalLocationCharacters.Clear();
         if (ReferenceEquals(ActivePlaybackMenu, this))
         {
             ActivePlaybackMenu = null;
@@ -1731,7 +1826,6 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
 
         Game1.currentLocation = this.previousLocation;
-        ModEntry.Instance.SetImportedPreviewMapAssetRequestsEnabled(false);
         this.previewPlayerCreated = false;
         this.playbackBootstrapActive = false;
         this.previousPlayer = null;

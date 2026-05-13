@@ -33,8 +33,6 @@ public sealed class ModEntry : Mod
     private Dictionary<string, PreviewMapOverride>? cachedContentPatcherPreviewMapOverrides;
     private readonly Dictionary<string, PreviewMapOverride> importedPreviewMapOverrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> previewTextureSources = new(StringComparer.OrdinalIgnoreCase);
-    private bool importedPreviewMapAssetRequestsEnabled;
-
     public override void Entry(IModHelper helper)
     {
         Instance = this;
@@ -102,24 +100,10 @@ public sealed class ModEntry : Mod
         LocationBootstrapper.RegisterPreviewMapOverrides(this.importedPreviewMapOverrides.Values);
     }
 
-    public void SetImportedPreviewMapAssetRequestsEnabled(bool enabled)
-    {
-        this.importedPreviewMapAssetRequestsEnabled = enabled;
-    }
-
     private void OnAssetRequested(object? sender, AssetRequestedEventArgs e)
     {
         PreviewMapOverride? preview = this.GetAllPreviewMapOverrides()
             .FirstOrDefault(entry => e.NameWithoutLocale.IsEquivalentTo(entry.PreviewAssetPath));
-
-        if (preview is null)
-        {
-            preview = this.importedPreviewMapAssetRequestsEnabled
-                ? this.importedPreviewMapOverrides
-                    .Values
-                    .FirstOrDefault(entry => e.NameWithoutLocale.IsEquivalentTo(entry.TargetMapPath))
-                : null;
-        }
 
         if (preview is null)
         {

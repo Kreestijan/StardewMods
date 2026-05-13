@@ -31,7 +31,7 @@ public static class VanillaEventCommandProvider
         yield return Define("broadcastEvent", "Broadcast Event", "broadcastEvent", Bool("useLocalFarmer", "Use Local Farmer", "", optional: true));
         yield return DefineUnsafe("catQuestion", "Cat Question", "catQuestion");
         yield return DefineUnsafe("cave", "Farm Cave Question", "cave");
-        yield return Define("changeLocation", "Change Location", "changeLocation", Text("location", "Location", "Town"));
+        yield return Define("changeLocation", "Change Location", "changeLocation", Text("location", "Location", "Town"), Bool("pan", "Pan viewport", "", optional: true));
         yield return Define("changeMapTile", "Change Map Tile", "changeMapTile", Text("layer", "Layer", "Buildings"), Integer("x", "X", "0"), Integer("y", "Y", "0"), Integer("tileIndex", "Tile Index", "0"));
         yield return Define("changeName", "Change Name", "changeName", Actor("actor", "Actor"), Text("name", "Display Name", "Name"));
         yield return Define("changePortrait", "Change Portrait", "changePortrait", Actor("actor", "NPC"), Text("portrait", "Portrait", "", optional: true));
