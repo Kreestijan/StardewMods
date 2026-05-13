@@ -69,6 +69,8 @@ public sealed class TimelinePanel : EditorPanel
 
     public bool AddMenuOpen => this.addMenuOpen;
 
+    private int lastAutoscrollMarkerIndex = -2;
+
     public bool HasTransientMenu => this.addMenuOpen || this.contextCommandIndex.HasValue;
 
     public bool HasSelectedTextField()
@@ -97,6 +99,26 @@ public sealed class TimelinePanel : EditorPanel
         foreach (BoundTextField field in this.textFields.Values)
         {
             field.Update();
+        }
+
+        this.AutoScrollToMarker();
+    }
+
+    private void AutoScrollToMarker()
+    {
+        int markerIndex = this.state.Mode == EditorMode.Play
+            ? this.state.PlaybackCommandIndex
+            : this.state.CommandMarkerIndex;
+
+        if (markerIndex == this.lastAutoscrollMarkerIndex)
+        {
+            return;
+        }
+
+        this.lastAutoscrollMarkerIndex = markerIndex;
+        if (markerIndex >= 0 && markerIndex < this.state.Cutscene.Commands.Count)
+        {
+            this.ScrollCommandIntoView(markerIndex);
         }
     }
 
@@ -127,7 +149,7 @@ public sealed class TimelinePanel : EditorPanel
                 _ => "Unknown"
             };
 
-            this.DrawBlockIfVisible(spriteBatch, visibleBounds, bounds, label, this.state.SelectedCommandIndex == commandIndex);
+            this.DrawBlockIfVisible(spriteBatch, visibleBounds, bounds, label, this.state.SelectedCommandIndex == commandIndex, this.CommandReferencesFarmer(command));
         }
 
         if (this.addButtonBounds.Intersects(visibleBounds))
@@ -351,15 +373,18 @@ public sealed class TimelinePanel : EditorPanel
         return width + AddButtonWidth;
     }
 
-    private void DrawBlock(SpriteBatch spriteBatch, Rectangle bounds, string label, bool selected)
+    private void DrawBlock(SpriteBatch spriteBatch, Rectangle bounds, string label, bool selected, bool hasFarmerRef = false)
     {
+        Color tint = hasFarmerRef
+            ? (selected ? Color.Coral : Color.LightCoral)
+            : (selected ? Color.LightGoldenrodYellow : Color.White);
         IClickableMenu.drawTextureBox(
             spriteBatch,
             bounds.X,
             bounds.Y,
             bounds.Width,
             bounds.Height,
-            selected ? Color.LightGoldenrodYellow : Color.White
+            tint
         );
 
         IReadOnlyList<string> lines = this.WrapBlockLabel(label, bounds.Width - BlockHorizontalTextPadding * 2);
@@ -379,11 +404,11 @@ public sealed class TimelinePanel : EditorPanel
         }
     }
 
-    private void DrawBlockIfVisible(SpriteBatch spriteBatch, Rectangle visibleBounds, Rectangle bounds, string label, bool selected)
+    private void DrawBlockIfVisible(SpriteBatch spriteBatch, Rectangle visibleBounds, Rectangle bounds, string label, bool selected, bool hasFarmerRef = false)
     {
         if (bounds.Intersects(visibleBounds))
         {
-            this.DrawBlock(spriteBatch, bounds, label, selected);
+            this.DrawBlock(spriteBatch, bounds, label, selected, hasFarmerRef);
         }
     }
 
@@ -833,6 +858,35 @@ public sealed class TimelinePanel : EditorPanel
         }
 
         return -1;
+    }
+
+    private bool CommandReferencesFarmer(object command)
+    {
+        if (this.state.Cutscene.IncludeFarmer)
+            return false;
+
+        if (command is not EventCommandBlock block)
+            return false;
+
+        if (!this.commandCatalog.TryGetById(block.CommandId, out EventCommandDefinition? definition))
+            return false;
+
+        foreach (EventCommandParameter param in definition.Parameters)
+        {
+            if (param.Type is not EventCommandParameterType.Actor
+                and not EventCommandParameterType.OptionalActor)
+                continue;
+
+            if (block.ActorSlotIds.TryGetValue(param.Key, out string? slotId)
+                && slotId.Equals(this.state.Cutscene.FarmerPlacement.ActorSlotId, StringComparison.Ordinal))
+                return true;
+
+            string value = block.Values.GetValueOrDefault(param.Key, param.DefaultValue);
+            if (value.Equals("farmer", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private string GetCommandLabel(object command)

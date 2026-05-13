@@ -199,6 +199,12 @@ public static class ContentPackImporter
 
             foreach (JObject token in tokenArray.OfType<JObject>())
             {
+                JToken? whenToken = token["When"];
+                if (!AreDynamicTokenConditionsMet(whenToken as JObject))
+                {
+                    continue;
+                }
+
                 string? name = token.Value<string>("Name");
                 string? value = token.Value<string>("Value");
                 if (string.IsNullOrWhiteSpace(name) || value is null)
@@ -529,6 +535,33 @@ public static class ContentPackImporter
             if (!condition.Name.Trim().StartsWith("HasSeenEvent", StringComparison.OrdinalIgnoreCase) || !IsFalseConditionValue(condition.Value))
             {
                 return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool AreDynamicTokenConditionsMet(JObject? when)
+    {
+        if (when is null || !when.HasValues)
+        {
+            return true;
+        }
+
+        foreach (JProperty condition in when.Properties())
+        {
+            string name = condition.Name.Trim();
+            string value = condition.Value.Type == JTokenType.String
+                ? condition.Value.Value<string>() ?? string.Empty
+                : condition.Value.ToString(Formatting.None);
+
+            if (name.StartsWith("HasMod", StringComparison.OrdinalIgnoreCase))
+            {
+                string[] modIds = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (modIds.Length == 0 || !modIds.Any(modId => ModEntry.Instance.Helper.ModRegistry.IsLoaded(modId)))
+                {
+                    return false;
+                }
             }
         }
 

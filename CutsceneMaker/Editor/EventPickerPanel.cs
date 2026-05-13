@@ -90,7 +90,7 @@ public sealed class EventPickerPanel
         this.DrawButton(spriteBatch, new Rectangle(bounds.Right - 120, y + 136, 92, ButtonHeight), "Depth +", () => this.SetScanDepth(this.scanDepth + 1));
         this.DrawLine(spriteBatch, this.statusMessage, x, y + 144, this.statusColor);
 
-        int listY = y + 188;
+        int listY = y + 210;
         int listWidth = bounds.Width - 56;
         List<ImportCandidate> filtered = this.GetFilteredCutscenes();
         if (this.importedCutscenes.Count > 0)
