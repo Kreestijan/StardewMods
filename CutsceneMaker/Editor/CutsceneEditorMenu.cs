@@ -88,6 +88,8 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private float previewFarmerMoveElapsedMs;
     private float previewFarmerMoveDurationMs;
     private int previewFarmerMoveFacing = 2;
+    private int stuckCommandIndex = -1;
+    private int stuckFrameCount;
 
     public CutsceneEditorMenu()
         : base(
@@ -1069,6 +1071,33 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 Game1.quit = false;
             }
 
+            // Stuck detection: force-advance past commands that neither our handler nor
+            // vanilla Event.Update can process, preventing infinite loops (e.g. loading
+            // a map whose tile sheets are only available through the content pipeline).
+            if (currentEvent.CurrentCommand == commandBeforeUpdate)
+            {
+                if (currentEvent.CurrentCommand == this.stuckCommandIndex && this.stuckFrameCount > 0)
+                {
+                    if (++this.stuckFrameCount >= 300)
+                    {
+                        ModEntry.Instance.Monitor.Log($"Cutscene Maker preview stuck at command {commandBeforeUpdate} for {this.stuckFrameCount} frames, force-advancing.", StardewModdingAPI.LogLevel.Warn);
+                        currentEvent.CurrentCommand++;
+                        this.stuckCommandIndex = -1;
+                        this.stuckFrameCount = 0;
+                    }
+                }
+                else
+                {
+                    this.stuckCommandIndex = currentEvent.CurrentCommand;
+                    this.stuckFrameCount = 1;
+                }
+            }
+            else
+            {
+                this.stuckCommandIndex = -1;
+                this.stuckFrameCount = 0;
+            }
+
             currentEvent = this.SyncPlaybackLocationAfterUpdate(location, currentEvent);
             this.CapturePreviewPause(currentEvent);
             this.UpdatePreviewFarmerMovementAnimation(time);
@@ -1283,14 +1312,33 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
 
         string previewMapPath = LocationBootstrapper.ResolvePreviewMapPathForMapName(mapName);
+        GameLocation? temporaryLocation;
         try
         {
-            this.LogPreviewMessage($"handling changeToTemporaryMap raw='{rawCommand}' resolved='{previewMapPath}' before={this.FormatPreviewState()}");
-            GameLocation temporaryLocation = mapName.Equals("Town", StringComparison.OrdinalIgnoreCase)
+            temporaryLocation = mapName.Equals("Town", StringComparison.OrdinalIgnoreCase)
                 ? new Town(previewMapPath, "Temp")
                 : new GameLocation(previewMapPath, "Temp");
-            temporaryLocation.map.LoadTileSheets(Game1.mapDisplayDevice);
+        }
+        catch (Exception ex)
+        {
+            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not load map '{mapName}' via '{previewMapPath}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
+            return false;
+        }
 
+        // Load tile sheets. If some tile sheets fail (e.g. CP-provided textures only
+        // available through the content pipeline), skip them rather than blocking playback.
+        try
+        {
+            temporaryLocation.map.LoadTileSheets(Game1.mapDisplayDevice);
+        }
+        catch
+        {
+            // Map will render with partial or missing tile textures in preview
+        }
+
+        this.LogPreviewMessage($"handling changeToTemporaryMap raw='{rawCommand}' resolved='{previewMapPath}' before={this.FormatPreviewState()}");
+        try
+        {
             Event runningEvent = Game1.currentLocation?.currentEvent ?? currentEvent;
             GameLocation? previousLocation = Game1.currentLocation;
             previousLocation?.cleanupBeforePlayerExit();
@@ -1321,12 +1369,12 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
             this.state.BootstrappedMap = temporaryLocation;
             this.playbackLocations.Add(temporaryLocation);
-            this.LogPreviewMessage($"handled changeToTemporaryMap map='{mapName}' resolved='{previewMapPath}' location={this.FormatLocation(temporaryLocation)} tilesheets={FormatTileSheets(temporaryLocation)} state={this.FormatPreviewState()}");
+            this.LogPreviewMessage($"handled changeToTemporaryMap map='{mapName}' resolved='{previewMapPath}' location={this.FormatLocation(temporaryLocation)} state={this.FormatPreviewState()}");
             return true;
         }
         catch (Exception ex)
         {
-            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not handle '{rawCommand}' via '{previewMapPath}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
+            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not complete '{rawCommand}' for map '{mapName}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
             return false;
         }
     }
