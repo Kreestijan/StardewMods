@@ -8,6 +8,7 @@ using StardewValley;
 using StardewValley.Locations;
 using StardewValley.Menus;
 using StardewValley.Quests;
+using xTile;
 using System.Reflection;
 
 namespace CutsceneMaker.Editor;
@@ -62,6 +63,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private float previousFadeToBlackAlpha;
     private float previousGlobalFadeSpeed;
     private xTile.Dimensions.Rectangle previousViewport;
+    private string? previousBootstrappedMap;
     private bool yieldPlaybackFrame;
     private float previewPauseRemainingMs;
     private int previewPauseCommandIndex = -1;
@@ -917,6 +919,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             this.previousFadeToBlackAlpha = Game1.fadeToBlackAlpha;
             this.previousGlobalFadeSpeed = Game1.globalFadeSpeed;
             this.previousViewport = Game1.viewport;
+            this.previousBootstrappedMap = this.state.SelectedLocationId;
             this.previewPlayerCreated = Game1.player is null;
             this.playbackBootstrapActive = true;
 
@@ -1319,10 +1322,23 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 ? new Town(previewMapPath, "Temp")
                 : new GameLocation(previewMapPath, "Temp");
         }
-        catch (Exception ex)
+        catch
         {
-            ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not load map '{mapName}' via '{previewMapPath}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
-            return false;
+            // File path failed — try content pipeline (handles CP-provided maps)
+            string contentPath = "Maps/" + mapName;
+            try
+            {
+                Map map = Game1.content.Load<Map>(contentPath);
+                temporaryLocation = new GameLocation("Maps/Farm", "Temp");
+                temporaryLocation.map = map;
+                temporaryLocation.name.Value = "Temp";
+                ModEntry.Instance.Monitor.Log($"Cutscene Maker loaded map '{mapName}' via content pipeline.", StardewModdingAPI.LogLevel.Trace);
+            }
+            catch (Exception ex)
+            {
+                ModEntry.Instance.Monitor.Log($"Cutscene Maker preview could not load map '{mapName}' via file '{previewMapPath}' or content '{contentPath}': {ex.Message}", StardewModdingAPI.LogLevel.Warn);
+                return false;
+            }
         }
 
         // Load tile sheets. If some tile sheets fail (e.g. CP-provided textures only
@@ -1692,6 +1708,14 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         Game1.globalFadeSpeed = this.previousGlobalFadeSpeed;
         this.state.Mode = EditorMode.Edit;
         this.state.PlaybackCommandIndex = -1;
+        this.stuckCommandIndex = -1;
+        this.stuckFrameCount = 0;
+
+        // Restore BootstrappedMap so the editor renders the original map after a failed preview
+        if (this.previousBootstrappedMap is not null)
+        {
+            this.LoadPreviewLocation(this.previousBootstrappedMap);
+        }
 
         if (this.previewPlayerCreated)
         {
