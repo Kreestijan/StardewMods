@@ -26,6 +26,21 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private const int LocationSearchHeight = 42;
     private const float PreviewFadeDurationMs = 500f;
     private const float PreviewFarmerMovePixelsPerSecond = 256f;
+    // Actor name → Character lookup cache built at playback start for O(1) lookup.
+    // NPC actors use the public showTextAboveHead() API; Farmer (which extends
+    // Character, not NPC) falls back to Character-level reflection fields.
+    private Dictionary<string, Character>? playbackActorCache;
+    private static readonly FieldInfo? NPCTextAboveHeadField = typeof(Character).GetField("textAboveHead", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? NPCTextAboveHeadTimerField = typeof(Character).GetField("textAboveHeadTimer", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? NPCTextAboveHeadColorField = typeof(Character).GetField("textAboveHeadColor", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? NPCTextAboveHeadPreTimerField = typeof(Character).GetField("textAboveHeadPreTimer", BindingFlags.Instance | BindingFlags.NonPublic);
+    // Text-above-head fields for NPC actors (declared on NPC, not Character).
+    // These are used by UpdateTextAboveHeadTimers() to tick bubble timers during preview —
+    // kept separate from the Character-targeting fields above (Farmer fallback path).
+    private static readonly FieldInfo? NPCAboveHeadTextField = typeof(NPC).GetField("textAboveHead", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? NPCAboveHeadPreTimerField = typeof(NPC).GetField("textAboveHeadPreTimer", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? NPCAboveHeadTimerField = typeof(NPC).GetField("textAboveHeadTimer", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? NPCAboveHeadAlphaField = typeof(NPC).GetField("textAboveHeadAlpha", BindingFlags.Instance | BindingFlags.NonPublic);
     // Public SMAPI/game APIs don't expose a writable Game1.player at the title screen.
     // Play preview needs a temporary farmer because Event initialization reads Game1.player.
     private static readonly PropertyInfo? GamePlayerProperty = typeof(Game1).GetProperty("player", BindingFlags.Public | BindingFlags.Static);
@@ -219,6 +234,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     public override void draw(SpriteBatch b)
     {
         b.Draw(Game1.fadeToBlackRect, Game1.graphics.GraphicsDevice.Viewport.Bounds, Color.Black * 0.55f);
+
         IClickableMenu.drawTextureBox(
             b,
             this.xPositionOnScreen,
@@ -979,6 +995,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 markEventSeen = false
             };
             this.playbackEvent = previewEvent;
+            this.playbackActorCache = BuildPlaybackActorCache(previewEvent);
             location.currentEvent = previewEvent;
             location.ResetForEvent(previewEvent);
             Game1.activeClickableMenu = this;
@@ -1024,6 +1041,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         try
         {
             Game1.currentLocation = location;
+            this.UpdateTextAboveHeadTimers(currentEvent, time);
             if (this.playbackMenu is not null)
             {
                 this.UpdateEventActorEmotes(currentEvent, time);
@@ -1055,12 +1073,19 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             }
 
             Game1.player?.updateEmote(time);
-            this.previewPlayerState = this.CapturePlayerState();
 
             int commandBeforeUpdate = currentEvent.CurrentCommand;
             this.LogPreviewCommand(currentEvent);
-            if (!this.TryHandlePreviewOnlyCommand(currentEvent))
+            if (this.TryHandlePreviewOnlyCommand(currentEvent))
             {
+                // Commands handled here do not mutate player state, so skip
+                // the expensive CapturePlayerState deep-copy for this frame.
+                this.previewPlayerState = null;
+            }
+            else
+            {
+                this.previewPlayerState = this.CapturePlayerState();
+
                 // Save critical game mode state before Event.Update().  Some event
                 // commands (end, switchEvent, or commands that set Game1.newDay) may
                 // call Game1.setGameMode(6) internally, which has irreversible side
@@ -1112,7 +1137,10 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             bool eventFinished = currentEvent.CurrentCommand >= currentEvent.eventCommands.Length;
 
             this.ContainPreviewGameState();
-            this.RestorePlayerState(this.previewPlayerState);
+            if (this.previewPlayerState is not null)
+            {
+                this.RestorePlayerState(this.previewPlayerState);
+            }
 
             if (currentEvent.CurrentCommand != commandBeforeUpdate)
             {
@@ -1191,7 +1219,72 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             return true;
         }
 
+        if (parts[0].Equals("textAboveHead", StringComparison.Ordinal))
+        {
+            return this.HandlePreviewTextAboveHead(currentEvent, parts);
+        }
+
         return false;
+    }
+
+    private bool HandlePreviewTextAboveHead(Event currentEvent, List<string> parts)
+    {
+        if (parts.Count < 3)
+        {
+            currentEvent.CurrentCommand++;
+            return true;
+        }
+
+        // Use the public NPC.showTextAboveHead() API for NPC actors.
+        // Farmer (extends Character, not NPC) falls back to Character-level
+        // reflection fields — these ARE on Character so typeof(Character) works.
+        string actorName = Unquote(parts[1]);
+        string text = Unquote(string.Join(" ", parts.Skip(2)));
+
+        Character? character;
+        if (this.playbackActorCache is not null && this.playbackActorCache.TryGetValue(actorName, out Character? cached))
+        {
+            character = cached;
+        }
+        else
+        {
+            character = currentEvent.actors.FirstOrDefault(a => a.Name == actorName);
+            if (character is null && actorName.Equals("farmer", StringComparison.OrdinalIgnoreCase))
+            {
+                character = Game1.player;
+            }
+        }
+
+        if (character is NPC npc)
+        {
+            npc.showTextAboveHead(text);
+        }
+        else if (character is not null)
+        {
+            // Farmer fallback via Character-level reflection fields
+            NPCTextAboveHeadField?.SetValue(character, text);
+            float timer = text.Contains('^') ? text.Split('^').Length * 1750f : 1750f;
+            NPCTextAboveHeadTimerField?.SetValue(character, timer);
+            NPCTextAboveHeadColorField?.SetValue(character, Color.White);
+            NPCTextAboveHeadPreTimerField?.SetValue(character, 500f);
+        }
+
+        currentEvent.CurrentCommand++;
+        return true;
+    }
+
+    private static Dictionary<string, Character> BuildPlaybackActorCache(Event ev)
+    {
+        var cache = new Dictionary<string, Character>(StringComparer.OrdinalIgnoreCase);
+        foreach (NPC actor in ev.actors)
+        {
+            cache[actor.Name] = actor;
+        }
+        if (Game1.player is not null)
+        {
+            cache["farmer"] = Game1.player;
+        }
+        return cache;
     }
 
     private bool HandlePreviewFarmerMove(Event currentEvent, List<string> parts, string rawCommand)
@@ -1777,6 +1870,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.playbackEvent = null;
         this.playbackPlayer = null;
         this.playbackMenu = null;
+        this.playbackActorCache = null;
         this.yieldPlaybackFrame = false;
         this.previewPauseRemainingMs = 0f;
         this.previewPauseCommandIndex = -1;
@@ -2181,6 +2275,50 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         }
 
         return false;
+    }
+
+    private void UpdateTextAboveHeadTimers(Event currentEvent, GameTime time)
+    {
+        int dt = time.ElapsedGameTime.Milliseconds;
+        if (dt <= 0)
+            return;
+
+        foreach (NPC actor in currentEvent.actors)
+        {
+            int preTimer = (int)(NPCAboveHeadPreTimerField?.GetValue(actor) ?? 0);
+            int timer = (int)(NPCAboveHeadTimerField?.GetValue(actor) ?? 0);
+            string? text = NPCAboveHeadTextField?.GetValue(actor) as string;
+
+            if (text is null || timer <= 0)
+                continue;
+
+            if (preTimer > 0)
+            {
+                preTimer -= dt;
+                NPCAboveHeadPreTimerField?.SetValue(actor, preTimer < 0 ? 0 : preTimer);
+            }
+            else
+            {
+                timer -= dt;
+                NPCAboveHeadTimerField?.SetValue(actor, timer < 0 ? 0 : timer);
+
+                float alpha = (float)(NPCAboveHeadAlphaField?.GetValue(actor) ?? 0f);
+                if (timer > 500)
+                {
+                    alpha = Math.Min(1f, alpha + 0.1f);
+                }
+                else
+                {
+                    alpha = Math.Max(0f, alpha - 0.03f);
+                    if (alpha <= 0f)
+                    {
+                        NPCAboveHeadTimerField?.SetValue(actor, 0);
+                        NPCAboveHeadTextField?.SetValue(actor, null);
+                    }
+                }
+                NPCAboveHeadAlphaField?.SetValue(actor, alpha);
+            }
+        }
     }
 
     private void UpdateEventActorEmotes(Event currentEvent, GameTime time)
