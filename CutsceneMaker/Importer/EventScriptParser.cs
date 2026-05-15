@@ -6,14 +6,14 @@ namespace CutsceneMaker.Importer;
 
 public static class EventScriptParser
 {
-    public static List<object> Parse(string script, CutsceneData cutscene, EventCommandCatalog? commandCatalog = null)
+    public static List<object> Parse(string script, CutsceneData cutscene, EventCommandCatalog? commandCatalog = null, bool preserveActors = false)
     {
         ArgumentNullException.ThrowIfNull(cutscene);
         commandCatalog ??= EventCommandCatalog.Empty;
 
         List<string> tokens = QuoteAwareSplit.Split(script, '/');
         List<object> commands = new();
-        int index = ParseHeader(tokens, cutscene, commandCatalog);
+        int index = ParseHeader(tokens, cutscene, commandCatalog, preserveActors);
         Dictionary<string, Point> actorPositions = BuildInitialActorPositions(cutscene);
 
         for (; index < tokens.Count; index++)
@@ -35,7 +35,7 @@ public static class EventScriptParser
         return commands;
     }
 
-    private static int ParseHeader(List<string> tokens, CutsceneData cutscene, EventCommandCatalog commandCatalog)
+    private static int ParseHeader(List<string> tokens, CutsceneData cutscene, EventCommandCatalog commandCatalog, bool preserveActors = false)
     {
         if (tokens.Count == 0)
         {
@@ -43,16 +43,19 @@ public static class EventScriptParser
         }
 
         cutscene.MusicTrack = tokens[0].Trim();
-        cutscene.IncludeFarmer = false;
-        if (tokens.Count >= 2)
+        if (!preserveActors)
         {
-            ParseViewport(tokens[1], cutscene);
+            cutscene.IncludeFarmer = false;
+            cutscene.Skippable = false;
+            cutscene.Actors.Clear();
         }
 
-        cutscene.Skippable = false;
-        cutscene.Actors.Clear();
+        // Viewport is optional in the SDV event format. If tokens[1] is a pair of
+        // integers (e.g. "0 0") it's the viewport; otherwise tokens[1] is already
+        // the placement header (actor tiles) and there is no viewport token.
+        bool hasViewport = tokens.Count >= 2 && TryParseViewport(tokens[1], cutscene);
+        int index = hasViewport ? 2 : 1;
 
-        int index = 2;
         if (tokens.Count > index)
         {
             string placementHeader = tokens[index].Trim();
@@ -139,6 +142,16 @@ public static class EventScriptParser
         if (definition.Id.Equals("vanilla.question", StringComparison.Ordinal) && parts.Length >= 3)
         {
             return ParseQuestionCommand(definition, parts);
+        }
+
+        // Track warp destinations so subsequent move commands compute absolute targets
+        // relative to the warp destination, not the initial placement position.
+        if (definition.Id.Equals("vanilla.warp", StringComparison.Ordinal) && parts.Length >= 4)
+        {
+            string actorName = Unquote(parts[1]);
+            int targetX = TryParseInt(parts[2]);
+            int targetY = TryParseInt(parts[3]);
+            actorPositions[actorName] = new Point(targetX, targetY);
         }
 
         EventCommandBlock block = definition.CreateDefaultBlock();
@@ -299,14 +312,16 @@ public static class EventScriptParser
         return matches.Count == 1 ? matches[0].ActorSlotId : null;
     }
 
-    private static void ParseViewport(string token, CutsceneData cutscene)
+    private static bool TryParseViewport(string token, CutsceneData cutscene)
     {
         string[] parts = token.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length >= 2 && int.TryParse(parts[0], out int x) && int.TryParse(parts[1], out int y))
         {
             cutscene.ViewportStartX = x;
             cutscene.ViewportStartY = y;
+            return true;
         }
+        return false;
     }
 
     private static bool TryParsePlacement(string token, out NpcPlacement placement)

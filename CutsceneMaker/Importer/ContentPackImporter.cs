@@ -404,11 +404,25 @@ public static class ContentPackImporter
                 CutsceneData cutscene = CutsceneData.CreateBlank();
                 cutscene.LocationName = expandedLocationName;
 
-                bool keyHasTokens = LooksTokenized(expandedKey);
+                // CP event keys have the format: uniqueId/placementHeader/precondition1/precondition2/...
+                // Extract the placement header from keyParts[1] before passing to EventKeyParser.
+                string keyForPreconditions = expandedKey;
+                string[] keyParts = expandedKey.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (keyParts.Length >= 2 && LooksLikePlacementHeader(keyParts[1]))
+                {
+                    ApplyKeyPlacementHeader(keyParts[1], cutscene);
+
+                    // Rebuild the key without the placement header segment for precondition parsing
+                    keyForPreconditions = string.Join("/", Enumerable.Range(0, keyParts.Length)
+                        .Where(idx => idx != 1)
+                        .Select(idx => keyParts[idx]));
+                }
+
+                bool keyHasTokens = LooksTokenized(keyForPreconditions);
                 bool scriptHasTokens = LooksTokenized(expandedScript);
 
                 // Always parse the key — EventKeyParser.Parse handles {{...}} gracefully
-                (string uniqueId, List<EventPreconditionBlock> triggers) = EventKeyParser.Parse(expandedKey, ModEntry.Instance.PreconditionCatalog);
+                (string uniqueId, List<EventPreconditionBlock> triggers) = EventKeyParser.Parse(keyForPreconditions, ModEntry.Instance.PreconditionCatalog);
                 cutscene.UniqueId = uniqueId;
                 cutscene.CutsceneName = uniqueId;
                 cutscene.Triggers = triggers;
@@ -427,7 +441,7 @@ public static class ContentPackImporter
                 // Parse script — existing parser handles tokenized content gracefully:
                 // - Known verb + token args → EventCommandBlock with token in Values
                 // - Unknown verb / standalone token → RawCommandBlock with token text preserved
-                cutscene.Commands = EventScriptParser.Parse(adjustedScript, cutscene, ModEntry.Instance.CommandCatalog);
+                cutscene.Commands = EventScriptParser.Parse(adjustedScript, cutscene, ModEntry.Instance.CommandCatalog, preserveActors: true);
 
                 if (scriptHasTokens)
                 {
@@ -620,6 +634,44 @@ public static class ContentPackImporter
     private static bool LooksTokenized(string value)
     {
         return value.Contains("{{", StringComparison.Ordinal);
+    }
+
+    /// <summary>Parses a placement header token from an event key (groups of 4:
+    /// name tileX tileY facing) and populates the cutscene's actors and/or farmer
+    /// placement. This handles CP event keys where the placement header is in the
+    /// entry name, not the entry value.</summary>
+    private static void ApplyKeyPlacementHeader(string placementToken, CutsceneData cutscene)
+    {
+        string[] parts = placementToken.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < parts.Length; i += 4)
+        {
+            string actorName = parts[i];
+            if (!int.TryParse(parts[i + 1], out int tileX)
+                || !int.TryParse(parts[i + 2], out int tileY)
+                || !int.TryParse(parts[i + 3], out int facing))
+            {
+                continue;
+            }
+
+            NpcPlacement placement = new()
+            {
+                ActorName = actorName,
+                TileX = tileX,
+                TileY = tileY,
+                Facing = facing
+            };
+
+            if (actorName.Equals("farmer", StringComparison.OrdinalIgnoreCase))
+            {
+                placement.ActorName = "farmer";
+                cutscene.FarmerPlacement = placement;
+                cutscene.IncludeFarmer = true;
+            }
+            else
+            {
+                cutscene.Actors.Add(placement);
+            }
+        }
     }
 
     /// <summary>If entry [0] contains expanded placements instead of a music track, replace it
