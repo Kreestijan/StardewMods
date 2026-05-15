@@ -1210,12 +1210,15 @@ public sealed class CutsceneEditorMenu : IClickableMenu
 
         if (parts[0].Equals("message", StringComparison.Ordinal))
         {
-            // Message doesn't use activeClickableMenu (uses drawObjectDialogue/dialogueUp),
-            // so CapturePlaybackMenu can't capture and auto-dismiss it the way it does for
-            // speak commands. Intercept here to advance past it and dismiss the dialogue.
-            Game1.dialogueUp = false;
-            Game1.messagePause = false;
-            currentEvent.CurrentCommand++;
+            // Message uses Game1.drawObjectDialogue() which sets dialogueUp but never
+            // creates an activeClickableMenu, so CapturePlaybackMenu can't capture it.
+            // Instead create a real DialogueBox as playbackMenu so the standard preview
+            // pause/dismiss/advance mechanism handles it like a speak command.
+            // Set activeClickableMenu to match so CapturePlaybackMenu's Phase 2 dismissal
+            // check (!ReferenceEquals) doesn't fire on the same frame — Phase 3 restores it.
+            string text = Unquote(string.Join(" ", parts.Skip(1)));
+            this.playbackMenu = new DialogueBox(text);
+            Game1.activeClickableMenu = this.playbackMenu;
             return true;
         }
 
