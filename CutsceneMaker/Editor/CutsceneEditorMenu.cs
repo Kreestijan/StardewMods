@@ -1076,7 +1076,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 return;
             }
 
-            if (this.UpdatePreviewFarmerMove(currentEvent, time))
+if (this.UpdatePreviewFarmerMove(currentEvent, time))
             {
                 this.CapturePlaybackMenu();
                 return;
@@ -1302,6 +1302,94 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             }
 
             Game1.activeClickableMenu = this.playbackMenu;
+            return true;
+        }
+
+        if (parts[0].Equals("viewport", StringComparison.Ordinal))
+        {
+            // SDV's Event.Update crashes on viewport commands when Game1.eventUp is false.
+            // Handle the viewport positioning directly in the preview.
+            // Use panel content dimensions from MapViewPanel for centering — Game1.viewport.Width/Height
+            // may reflect the full game window rather than the panel, producing off-center positioning.
+            string target = parts.Count > 1 ? Unquote(parts[1]) : "";
+            int panelWidth = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
+            int panelHeight = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+
+            GameLocation? bootstrappedMap = this.state.BootstrappedMap;
+            int mapMaxX = bootstrappedMap is not null
+                ? Math.Max(0, bootstrappedMap.Map.DisplayWidth - Game1.viewport.Width)
+                : int.MaxValue;
+            int mapMaxY = bootstrappedMap is not null
+                ? Math.Max(0, bootstrappedMap.Map.DisplayHeight - Game1.viewport.Height)
+                : int.MaxValue;
+
+            if (target.Equals("farmer", StringComparison.OrdinalIgnoreCase))
+            {
+                Farmer farmer = Game1.player;
+                if (farmer is not null)
+                {
+                    int targetX = (int)farmer.Position.X - panelWidth / 2;
+                    int targetY = (int)farmer.Position.Y - panelHeight / 2;
+                    Game1.viewport = new xTile.Dimensions.Rectangle(
+                        Math.Clamp(targetX, 0, mapMaxX),
+                        Math.Clamp(targetY, 0, mapMaxY),
+                        panelWidth, panelHeight);
+                }
+            }
+            else if (target.Equals("move", StringComparison.OrdinalIgnoreCase) && parts.Count >= 5
+                     && int.TryParse(Unquote(parts[2]), out int dx)
+                     && int.TryParse(Unquote(parts[3]), out int dy))
+            {
+                // viewport move <dx> <dy> <duration> — snap to offset, ignores duration.
+                // Vanilla SDV has no smooth-pan viewport, so the preview snaps to match.
+                int targetX = Game1.viewport.X + dx * Game1.tileSize;
+                int targetY = Game1.viewport.Y + dy * Game1.tileSize;
+
+                Game1.viewport = new xTile.Dimensions.Rectangle(
+                    Math.Clamp(targetX, 0, mapMaxX),
+                    Math.Clamp(targetY, 0, mapMaxY),
+                    panelWidth, panelHeight);
+                Game1.nonWarpFade = false;
+                currentEvent.CurrentCommand++;
+                return true;
+            }
+            else
+            {
+                Character? character = null;
+                if (this.playbackActorCache is not null && this.playbackActorCache.TryGetValue(target, out Character? cached))
+                {
+                    character = cached;
+                }
+                else
+                {
+                    character = currentEvent.actors.FirstOrDefault(a => a.Name.Equals(target, StringComparison.OrdinalIgnoreCase));
+                }
+
+                int targetX, targetY;
+                if (character is not null)
+                {
+                    targetX = (int)character.Position.X - panelWidth / 2;
+                    targetY = (int)character.Position.Y - panelHeight / 2;
+                }
+                else if (int.TryParse(target, out int x) && parts.Count >= 3 && int.TryParse(Unquote(parts[2]), out int y))
+                {
+                    targetX = x * Game1.tileSize + Game1.tileSize / 2 - panelWidth / 2;
+                    targetY = y * Game1.tileSize + Game1.tileSize / 2 - panelHeight / 2;
+                }
+                else
+                {
+                    targetX = Game1.viewport.X;
+                    targetY = Game1.viewport.Y;
+                }
+
+                Game1.viewport = new xTile.Dimensions.Rectangle(
+                    Math.Clamp(targetX, 0, mapMaxX),
+                    Math.Clamp(targetY, 0, mapMaxY),
+                    panelWidth, panelHeight);
+            }
+
+            Game1.nonWarpFade = false;
+            currentEvent.CurrentCommand++;
             return true;
         }
 
@@ -1960,7 +2048,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.yieldPlaybackFrame = false;
         this.previewPauseRemainingMs = 0f;
         this.previewPauseCommandIndex = -1;
-        this.ResetPreviewFarmerMove();
+                this.ResetPreviewFarmerMove();
         this.lastLoggedPreviewCommandIndex = -1;
         this.lastLoggedPlaybackMenuType = string.Empty;
         Game1.dialogueUp = false;
@@ -2055,11 +2143,18 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                 Point? tilePos = this.GetSimulatedActorTile(actorName);
                 if (tilePos.HasValue)
                 {
-                    int vpX = tilePos.Value.X * Game1.tileSize - Game1.viewport.Width / 2;
-                    int vpY = tilePos.Value.Y * Game1.tileSize - Game1.viewport.Height / 2;
-                    vpX = Math.Max(0, vpX);
-                    vpY = Math.Max(0, vpY);
-                    Game1.viewport = new xTile.Dimensions.Rectangle(vpX, vpY, Game1.viewport.Width, Game1.viewport.Height);
+                    int vpW = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
+                    int vpH = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+                    int tileCenterX = tilePos.Value.X * Game1.tileSize + Game1.tileSize / 2;
+                    int tileCenterY = tilePos.Value.Y * Game1.tileSize + Game1.tileSize / 2;
+                    int vpX = tileCenterX - vpW / 2;
+                    int vpY = tileCenterY - vpH / 2;
+                    int maxX = Math.Max(0, this.state.BootstrappedMap.Map.DisplayWidth - vpW);
+                    int maxY = Math.Max(0, this.state.BootstrappedMap.Map.DisplayHeight - vpH);
+                    Game1.viewport = new xTile.Dimensions.Rectangle(
+                        Math.Clamp(vpX, 0, maxX),
+                        Math.Clamp(vpY, 0, maxY),
+                        vpW, vpH);
                 }
             }
         }
