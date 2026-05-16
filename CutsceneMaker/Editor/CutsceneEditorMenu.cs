@@ -393,6 +393,16 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         base.releaseLeftClick(x, y);
     }
 
+    public override void performHoverAction(int mouseX, int mouseY)
+    {
+        if (this.state.Mode == EditorMode.Play && this.playbackMenu is not null)
+        {
+            this.playbackMenu.performHoverAction(mouseX, mouseY);
+        }
+
+        base.performHoverAction(mouseX, mouseY);
+    }
+
     public override void receiveRightClick(int x, int y, bool playSound = true)
     {
         if (this.closeConfirmationOpen)
@@ -1218,6 +1228,79 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             // check (!ReferenceEquals) doesn't fire on the same frame — Phase 3 restores it.
             string text = Unquote(string.Join(" ", parts.Skip(1)));
             this.playbackMenu = new DialogueBox(text);
+            Game1.activeClickableMenu = this.playbackMenu;
+            return true;
+        }
+
+        if (parts[0].Equals("end", StringComparison.Ordinal) && parts.Count >= 4
+            && (parts[1].Equals("dialogue", StringComparison.OrdinalIgnoreCase)
+                || parts[1].Equals("dialogueWarpOut", StringComparison.OrdinalIgnoreCase)))
+        {
+            // end dialogue and end dialogueWarpOut use Game1.drawObjectDialogue() internally
+            // which never sets activeClickableMenu, so CapturePlaybackMenu can't capture it.
+            // Same root cause as message — create a real DialogueBox.
+            string text = Unquote(string.Join(" ", parts.Skip(3)));
+            this.playbackMenu = new DialogueBox(text);
+            Game1.activeClickableMenu = this.playbackMenu;
+            return true;
+        }
+
+        if (parts[0].Equals("quickQuestion", StringComparison.Ordinal))
+        {
+            // Replicate the vanilla SDV QuickQuestion handler EXACTLY.
+            // The handler checks Game1.activeClickableMenu == null, but our
+            // ContainPreviewGameState sets it to the editor every frame — so the
+            // vanilla handler silently skips the command. We bypass by calling
+            // createQuestionDialogue directly.
+            string cmdText = currentEvent.eventCommands[currentEvent.CurrentCommand];
+            int spaceIndex = cmdText.IndexOf(' ');
+            string afterVerb = spaceIndex >= 0 ? cmdText.Substring(spaceIndex + 1) : "";
+            string[] splitByBreak = afterVerb.Split(new[] { "(break)" }, StringSplitOptions.None);
+            string qSection = splitByBreak.Length > 0 ? splitByBreak[0] : "";
+            string[] fields = qSection.Split('#');
+
+            string question = fields.Length > 0 ? fields[0].Trim().Trim('"') : "Choose an option:";
+            var responses = new List<Response>();
+            for (int i = 1; i < fields.Length; i++)
+            {
+                string text = fields[i].Trim().Trim('"');
+                responses.Add(new Response((i - 1).ToString(), text));
+            }
+
+            // For the no-# case (entire text is the question), or 0-option question
+            if (responses.Count == 0)
+            {
+                this.playbackMenu = new DialogueBox(question);
+            }
+            else
+            {
+                // Use the afterQuestionBehavior callback overload to replicate
+                // Event.answerDialogue("quickQuestion", ...) sub-command insertion.
+                // Game1.eventUp is false in preview mode, so the vanilla answer chain
+                // (GameLocation.answerDialogue → Event.answerDialogue) never fires.
+                Game1.currentLocation.createQuestionDialogue(
+                    question,
+                    responses.ToArray(),
+                    (who, whichAnswer) =>
+                    {
+                        int answerChoice = int.Parse(whichAnswer);
+                        // Sub-commands start at splitByBreak[1 + answerChoice], split by \
+                        if (answerChoice + 1 < splitByBreak.Length)
+                        {
+                            string[] subCommands = splitByBreak[1 + answerChoice].Split('\\');
+                            if (subCommands.Length > 0)
+                            {
+                                var cmdList = currentEvent.eventCommands.ToList();
+                                cmdList.InsertRange(currentEvent.CurrentCommand + 1, subCommands);
+                                currentEvent.eventCommands = cmdList.ToArray();
+                            }
+                        }
+                    },
+                    null  // speaker
+                );
+                this.playbackMenu = Game1.activeClickableMenu as DialogueBox;
+            }
+
             Game1.activeClickableMenu = this.playbackMenu;
             return true;
         }
@@ -2389,7 +2472,9 @@ public sealed class CutsceneEditorMenu : IClickableMenu
                     .Select(p => p.Trim())
                     .FirstOrDefault() ?? string.Empty;
                 if (cmdWord.Equals("speak", StringComparison.OrdinalIgnoreCase)
-                    || cmdWord.Equals("message", StringComparison.OrdinalIgnoreCase))
+                    || cmdWord.Equals("message", StringComparison.OrdinalIgnoreCase)
+                    || cmdWord.Equals("end", StringComparison.OrdinalIgnoreCase)
+                    || cmdWord.Equals("quickQuestion", StringComparison.OrdinalIgnoreCase))
                 {
                     evt.CurrentCommand++;
                 }
