@@ -38,6 +38,8 @@ public sealed class TimelinePanel : EditorPanel
     private const int AutoScrollEdgePadding = 48;
     private readonly EditorState state;
     private readonly EventCommandCatalog commandCatalog;
+
+    public Action<int>? OnCommandClicked { get; set; }
     private readonly List<(Rectangle Bounds, int CommandIndex)> commandBlocks = new();
     private readonly List<(Rectangle Bounds, AddMenuEntry Entry)> addMenuRows = new();
     private readonly Dictionary<string, BoundTextField> textFields = new();
@@ -204,6 +206,7 @@ public sealed class TimelinePanel : EditorPanel
         {
             this.state.SelectedCommandIndex = -1;
             this.CloseTransientMenus();
+            this.OnCommandClicked?.Invoke(-1);
             return;
         }
 
@@ -213,6 +216,7 @@ public sealed class TimelinePanel : EditorPanel
             {
                 this.state.SelectedCommandIndex = commandIndex;
                 this.CloseTransientMenus();
+                this.OnCommandClicked?.Invoke(commandIndex);
                 if (this.CanEditCommand(commandIndex))
                 {
                     this.StartDrag(commandIndex, bounds, x, y);

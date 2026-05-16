@@ -50,4 +50,21 @@ public sealed class EditorState
     /// <summary>Actor positions accumulated by fast-track simulation. Passed to EventScriptBuilder for play-from-marker.</summary>
     [JsonIgnore]
     public Dictionary<string, Point> SimulatedActorPositions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Viewport pixel position from the last fast-tracked viewport command. -1 = unset.</summary>
+    [JsonIgnore]
+    public int SimulatedViewportX { get; set; } = -1;
+
+    /// <summary>Viewport pixel position from the last fast-tracked viewport command. -1 = unset.</summary>
+    [JsonIgnore]
+    public int SimulatedViewportY { get; set; } = -1;
+
+    /// <summary>Target center pixel from the last fast-tracked viewport command. -1 = unset.
+    /// Used by GetInitialPlaybackViewport to compute the correct viewport position
+    /// for the current game viewport dimensions at playback time.</summary>
+    [JsonIgnore]
+    public int SimulatedViewportCenterX { get; set; } = -1;
+
+    [JsonIgnore]
+    public int SimulatedViewportCenterY { get; set; } = -1;
 }

@@ -59,6 +59,8 @@ public sealed class CutsceneEditorMenu : IClickableMenu
     private SaveDialogPanel? saveDialogPanel;
     private EventPickerPanel? eventPickerPanel;
     private string toolbarStatusMessage = string.Empty;
+    private Color toolbarStatusColor = Color.DarkGreen;
+    private bool simulateOnClick = true;
     private Farmer? previousPlayer;
     private GameLocation? previousPlayerLocation;
     private Vector2 previousPlayerPosition;
@@ -126,6 +128,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
         this.LoadPreviewLocation(this.state.Cutscene.LocationName);
         this.mapViewPanel = new MapViewPanel(this.state);
         this.timelinePanel = new TimelinePanel(this.state, ModEntry.Instance.CommandCatalog);
+        this.timelinePanel.OnCommandClicked = this.JumpToCommand;
         this.propertiesPanel = new PropertiesPanel(this.state, ModEntry.Instance.CommandCatalog, this.OpenPreconditionEditor);
         this.RecalculateLayout();
     }
@@ -925,6 +928,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             if (validationErrors.Count > 0)
             {
                 this.toolbarStatusMessage = "Cannot preview: " + validationErrors[0];
+                this.toolbarStatusColor = Color.Red;
                 return;
             }
 
@@ -932,6 +936,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             if (location is null)
             {
                 this.toolbarStatusMessage = $"Cannot play: {this.state.MapLoadFailureMessage}";
+                this.toolbarStatusColor = Color.Red;
                 return;
             }
 
@@ -974,7 +979,6 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             previewPlayer.Position = new Vector2(previewPlayerTile.X * Game1.tileSize, previewPlayerTile.Y * Game1.tileSize);
 
             Game1.currentLocation = location;
-            Game1.viewport = this.GetInitialPlaybackViewport(location, previewPlayerTile);
             location.currentEvent = null;
             location.characters.Clear();
             this.playbackLocations.Clear();
@@ -1008,6 +1012,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             this.playbackActorCache = BuildPlaybackActorCache(previewEvent);
             location.currentEvent = previewEvent;
             location.ResetForEvent(previewEvent);
+            Game1.viewport = this.GetInitialPlaybackViewport(location, previewPlayerTile);
             Game1.activeClickableMenu = this;
             // Keep the preview local to the editor. Setting the global event flag makes other mods treat
             // this as a real in-game event even though we're driving Event.Update manually from a menu.
@@ -1035,6 +1040,7 @@ public sealed class CutsceneEditorMenu : IClickableMenu
             ModEntry.Instance.Monitor.Log($"Cutscene Maker play preview failed: {ex}", StardewModdingAPI.LogLevel.Error);
             this.StopPlayback();
             this.toolbarStatusMessage = "Preview failed. See SMAPI log.";
+            this.toolbarStatusColor = Color.Red;
         }
     }
 
@@ -1104,6 +1110,14 @@ if (this.UpdatePreviewFarmerMove(currentEvent, time))
                 byte savedGameMode = Game1.gameMode;
 
                 currentEvent.Update(location, time);
+
+                // When playing from a marker, the header (eventCommands[0-2]) sets Game1.viewport
+                // to the event file's viewport coordinates. After the first Event.Update processes
+                // the header, correct the viewport to the backwards-search position instead.
+                if (this.state.CommandMarkerIndex >= 0 && commandBeforeUpdate < 3 && currentEvent.CurrentCommand >= 3)
+                {
+                    Game1.viewport = this.GetInitialPlaybackViewport(location, this.GetPreviewPlayerTile());
+                }
 
                 Game1.gameMode = savedGameMode;
                 Game1.newDay = false;
@@ -2004,20 +2018,107 @@ if (this.UpdatePreviewFarmerMove(currentEvent, time))
 
     private xTile.Dimensions.Rectangle GetInitialPlaybackViewport(GameLocation location, Point fallbackTile)
     {
-        int viewportWidth = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
-        int viewportHeight = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+        // The event preview renders within the map panel, not the full game window.
+        // GetDrawViewport overrides the viewport W/H to panel content dimensions
+        // during rendering, so centering must use panel dimensions.
+        int vpW = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
+        int vpH = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+
+        if (this.state.CommandMarkerIndex >= 0)
+        {
+            // Path A: search backwards from marker for the closest viewport command
+            for (int i = this.state.CommandMarkerIndex; i >= 0; i--)
+            {
+                if (this.state.Cutscene.Commands[i] is EventCommandBlock cmd
+                    && cmd.CommandId.Equals("vanilla.viewport", StringComparison.Ordinal))
+                {
+                    xTile.Dimensions.Rectangle? result = this.ComputeViewportFromCommand(cmd, location, vpW, vpH);
+                    if (result.HasValue)
+                    {
+                        return result.Value;
+                    }
+                }
+            }
+
+            // Path B: no viewport command found to the left — re-center editor viewport
+            int panelW = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
+            int panelH = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+            int centerX = Game1.viewport.X + panelW / 2;
+            int centerY = Game1.viewport.Y + panelH / 2;
+            int vx = centerX - vpW / 2;
+            int vy = centerY - vpH / 2;
+
+            int clampMaxX = Math.Max(0, location.Map.DisplayWidth - vpW);
+            int clampMaxY = Math.Max(0, location.Map.DisplayHeight - vpH);
+            return new xTile.Dimensions.Rectangle(
+                Math.Clamp(vx, 0, clampMaxX),
+                Math.Clamp(vy, 0, clampMaxY),
+                vpW, vpH
+            );
+        }
+
+        // Path C: no marker — use cutscene header or fallback tile
         int tileX = this.state.Cutscene.ViewportStartX >= 0 ? this.state.Cutscene.ViewportStartX : fallbackTile.X;
         int tileY = this.state.Cutscene.ViewportStartY >= 0 ? this.state.Cutscene.ViewportStartY : fallbackTile.Y;
-
-        int x = Math.Max(0, tileX * Game1.tileSize);
-        int y = Math.Max(0, tileY * Game1.tileSize);
-        int maxX = Math.Max(0, location.Map.DisplayWidth - viewportWidth);
-        int maxY = Math.Max(0, location.Map.DisplayHeight - viewportHeight);
+        int px = Math.Max(0, tileX * Game1.tileSize);
+        int py = Math.Max(0, tileY * Game1.tileSize);
+        int maxX = Math.Max(0, location.Map.DisplayWidth - vpW);
+        int maxY = Math.Max(0, location.Map.DisplayHeight - vpH);
         return new xTile.Dimensions.Rectangle(
-            Math.Clamp(x, 0, maxX),
-            Math.Clamp(y, 0, maxY),
-            viewportWidth,
-            viewportHeight
+            Math.Clamp(px, 0, maxX),
+            Math.Clamp(py, 0, maxY),
+            vpW, vpH
+        );
+    }
+
+    private xTile.Dimensions.Rectangle? ComputeViewportFromCommand(EventCommandBlock cmd, GameLocation location, int vpW, int vpH)
+    {
+        string raw = cmd.Values.GetValueOrDefault("target", string.Empty);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        string[] parts = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return null;
+        }
+
+        int cx = -1, cy = -1;
+
+        // Try numeric tile coordinates first (e.g., "viewport 50 50")
+        if (parts.Length >= 2
+            && int.TryParse(Unquote(parts[0]), out int tileX)
+            && int.TryParse(Unquote(parts[1]), out int tileY))
+        {
+            cx = tileX * Game1.tileSize + Game1.tileSize / 2;
+            cy = tileY * Game1.tileSize + Game1.tileSize / 2;
+        }
+        else
+        {
+            // Named actor target — use GetSimulatedActorTile for fallback chain
+            Point? tilePos = this.GetSimulatedActorTile(parts[0]);
+            if (tilePos.HasValue)
+            {
+                cx = tilePos.Value.X * Game1.tileSize + Game1.tileSize / 2;
+                cy = tilePos.Value.Y * Game1.tileSize + Game1.tileSize / 2;
+            }
+        }
+
+        if (cx < 0 || cy < 0)
+        {
+            return null;
+        }
+
+        int vx = cx - vpW / 2;
+        int vy = cy - vpH / 2;
+        int maxX = Math.Max(0, location.Map.DisplayWidth - vpW);
+        int maxY = Math.Max(0, location.Map.DisplayHeight - vpH);
+        return new xTile.Dimensions.Rectangle(
+            Math.Clamp(vx, 0, maxX),
+            Math.Clamp(vy, 0, maxY),
+            vpW, vpH
         );
     }
 
@@ -2126,6 +2227,7 @@ if (this.UpdatePreviewFarmerMove(currentEvent, time))
         if (nextIndex >= this.state.Cutscene.Commands.Count)
         {
             this.toolbarStatusMessage = "Already at the end of the cutscene.";
+            this.toolbarStatusColor = Color.Red;
             return;
         }
 
@@ -2134,36 +2236,97 @@ if (this.UpdatePreviewFarmerMove(currentEvent, time))
         this.state.CommandMarkerIndex = nextIndex;
 
         // Pan viewport to center on the command's actor during fast-track
-        if (this.state.Mode == EditorMode.Play && this.state.BootstrappedMap is not null
-            && command is EventCommandBlock eventCommand2)
+        if (this.state.BootstrappedMap is not null)
         {
-            string actorName = this.ResolveActorNameForSimulation(eventCommand2);
-            if (!string.IsNullOrEmpty(actorName))
-            {
-                Point? tilePos = this.GetSimulatedActorTile(actorName);
-                if (tilePos.HasValue)
-                {
-                    int vpW = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
-                    int vpH = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
-                    int tileCenterX = tilePos.Value.X * Game1.tileSize + Game1.tileSize / 2;
-                    int tileCenterY = tilePos.Value.Y * Game1.tileSize + Game1.tileSize / 2;
-                    int vpX = tileCenterX - vpW / 2;
-                    int vpY = tileCenterY - vpH / 2;
-                    int maxX = Math.Max(0, this.state.BootstrappedMap.Map.DisplayWidth - vpW);
-                    int maxY = Math.Max(0, this.state.BootstrappedMap.Map.DisplayHeight - vpH);
-                    Game1.viewport = new xTile.Dimensions.Rectangle(
-                        Math.Clamp(vpX, 0, maxX),
-                        Math.Clamp(vpY, 0, maxY),
-                        vpW, vpH);
-                }
-            }
+            this.CenterViewportOnCommandMarker();
         }
+
+        this.toolbarStatusColor = Color.DarkGreen;
+    }
+
+    private void BackTrack()
+    {
+        if (this.state.CommandMarkerIndex < 0)
+        {
+            this.toolbarStatusMessage = "Already at the setup block.";
+            this.toolbarStatusColor = Color.Red;
+            return;
+        }
+
+        this.state.CommandMarkerIndex--;
+
+        // Re-simulate all actor positions from scratch up to the new marker
+        this.state.SimulatedActorPositions.Clear();
+        this.state.SimulatedViewportCenterX = -1;
+        this.state.SimulatedViewportCenterY = -1;
+        this.state.SimulatedViewportX = -1;
+        this.state.SimulatedViewportY = -1;
+        for (int i = 0; i <= this.state.CommandMarkerIndex; i++)
+        {
+            this.SimulateCommandEffect(this.state.Cutscene.Commands[i]);
+        }
+
+        if (this.state.BootstrappedMap is not null)
+        {
+            this.CenterViewportOnCommandMarker();
+        }
+
+        this.toolbarStatusMessage = this.state.CommandMarkerIndex < 0
+            ? "Back to setup block."
+            : $"Back to command {this.state.CommandMarkerIndex + 1}.";
+        this.toolbarStatusColor = Color.DarkGreen;
+    }
+
+    private void CenterViewportOnCommandMarker()
+    {
+        if (this.state.CommandMarkerIndex < 0 || this.state.BootstrappedMap is null)
+        {
+            return;
+        }
+
+        object command = this.state.Cutscene.Commands[this.state.CommandMarkerIndex];
+        if (command is not EventCommandBlock eventCommand)
+        {
+            return;
+        }
+
+        string actorName = this.ResolveActorNameForSimulation(eventCommand);
+        if (string.IsNullOrEmpty(actorName))
+        {
+            return;
+        }
+
+        Point? tilePos = this.GetSimulatedActorTile(actorName);
+        if (!tilePos.HasValue)
+        {
+            return;
+        }
+
+        int vpW = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
+        int vpH = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+        int tileCenterX = tilePos.Value.X * Game1.tileSize + Game1.tileSize / 2;
+        int tileCenterY = tilePos.Value.Y * Game1.tileSize + Game1.tileSize / 2;
+        int vpX = tileCenterX - vpW / 2;
+        int vpY = tileCenterY - vpH / 2;
+        int maxX = Math.Max(0, this.state.BootstrappedMap.Map.DisplayWidth - vpW);
+        int maxY = Math.Max(0, this.state.BootstrappedMap.Map.DisplayHeight - vpH);
+        Game1.viewport = new xTile.Dimensions.Rectangle(
+            Math.Clamp(vpX, 0, maxX),
+            Math.Clamp(vpY, 0, maxY),
+            vpW, vpH);
     }
 
     private void SimulateCommandEffect(object command)
     {
         if (command is not EventCommandBlock eventCommand)
         {
+            return;
+        }
+
+        // Handle viewport commands first — they don't use the standard actor resolution
+        if (eventCommand.CommandId.Equals("vanilla.viewport", StringComparison.Ordinal))
+        {
+            this.SimulateViewportEffect(eventCommand);
             return;
         }
 
@@ -2198,6 +2361,83 @@ if (this.UpdatePreviewFarmerMove(currentEvent, time))
 
                 break;
             }
+        }
+    }
+
+    private void SimulateViewportEffect(EventCommandBlock eventCommand)
+    {
+        string raw = eventCommand.Values.GetValueOrDefault("target", string.Empty);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return;
+        }
+
+        string[] vpParts = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (vpParts.Length == 0)
+        {
+            return;
+        }
+
+        string vpTarget = vpParts[0];
+
+        int cx = -1, cy = -1;
+
+        if (vpTarget.Equals("farmer", StringComparison.OrdinalIgnoreCase))
+        {
+            Point? farmerPos = this.GetSimulatedActorTile("farmer");
+            if (farmerPos.HasValue)
+            {
+                cx = farmerPos.Value.X * Game1.tileSize + Game1.tileSize / 2;
+                cy = farmerPos.Value.Y * Game1.tileSize + Game1.tileSize / 2;
+            }
+        }
+        else if (vpParts.Length >= 2
+                 && int.TryParse(Unquote(vpParts[0]), out int vx)
+                 && int.TryParse(Unquote(vpParts[1]), out int vy))
+        {
+            cx = vx * Game1.tileSize + Game1.tileSize / 2;
+            cy = vy * Game1.tileSize + Game1.tileSize / 2;
+        }
+        else
+        {
+            Point? targetPos = this.GetSimulatedActorTile(vpTarget);
+            if (targetPos.HasValue)
+            {
+                cx = targetPos.Value.X * Game1.tileSize + Game1.tileSize / 2;
+                cy = targetPos.Value.Y * Game1.tileSize + Game1.tileSize / 2;
+            }
+        }
+
+        if (cx >= 0 && cy >= 0)
+        {
+            // Store the target center so GetInitialPlaybackViewport can compute
+            // the correct viewport position for the current game viewport dimensions
+            this.state.SimulatedViewportCenterX = cx;
+            this.state.SimulatedViewportCenterY = cy;
+
+            // Also compute panel-centered position for the editor viewport preview
+            int panelW = Math.Max(1, this.mapViewPanel.Bounds.Width - 32);
+            int panelH = Math.Max(1, this.mapViewPanel.Bounds.Height - 68);
+            int vpX = cx - panelW / 2;
+            int vpY = cy - panelH / 2;
+
+            if (this.state.BootstrappedMap is not null)
+            {
+                int maxX = Math.Max(0, this.state.BootstrappedMap.Map.DisplayWidth - Game1.viewport.Width);
+                int maxY = Math.Max(0, this.state.BootstrappedMap.Map.DisplayHeight - Game1.viewport.Height);
+                this.state.SimulatedViewportX = Math.Clamp(vpX, 0, maxX);
+                this.state.SimulatedViewportY = Math.Clamp(vpY, 0, maxY);
+            }
+            else
+            {
+                this.state.SimulatedViewportX = vpX;
+                this.state.SimulatedViewportY = vpY;
+            }
+        }
+        else
+        {
+            this.state.SimulatedViewportCenterX = -1;
+            this.state.SimulatedViewportCenterY = -1;
         }
     }
 
@@ -2245,9 +2485,59 @@ if (this.UpdatePreviewFarmerMove(currentEvent, time))
 
     private void ResetMarker()
     {
+        if (this.state.CommandMarkerIndex < 0)
+        {
+            this.toolbarStatusMessage = "No marker to reset.";
+            this.toolbarStatusColor = Color.Red;
+            return;
+        }
+
         this.state.CommandMarkerIndex = -1;
         this.state.SimulatedActorPositions.Clear();
+        this.state.SimulatedViewportCenterX = -1;
+        this.state.SimulatedViewportCenterY = -1;
+        this.state.SimulatedViewportX = -1;
+        this.state.SimulatedViewportY = -1;
         this.toolbarStatusMessage = "Marker reset to setup.";
+        this.toolbarStatusColor = Color.DarkGreen;
+    }
+
+    private void ToggleSimulateOnClick()
+    {
+        this.simulateOnClick = !this.simulateOnClick;
+        this.toolbarStatusMessage = this.simulateOnClick ? "Simulate on click: On" : "Simulate on click: Off";
+        this.toolbarStatusColor = Color.DarkGreen;
+    }
+
+    private void JumpToCommand(int commandIndex)
+    {
+        if (this.state.Mode != EditorMode.Edit || !this.simulateOnClick)
+        {
+            return;
+        }
+
+        this.state.CommandMarkerIndex = commandIndex;
+
+        this.state.SimulatedActorPositions.Clear();
+        this.state.SimulatedViewportCenterX = -1;
+        this.state.SimulatedViewportCenterY = -1;
+        this.state.SimulatedViewportX = -1;
+        this.state.SimulatedViewportY = -1;
+
+        for (int i = 0; i <= commandIndex; i++)
+        {
+            this.SimulateCommandEffect(this.state.Cutscene.Commands[i]);
+        }
+
+        if (this.state.BootstrappedMap is not null)
+        {
+            this.CenterViewportOnCommandMarker();
+        }
+
+        this.toolbarStatusMessage = commandIndex < 0
+            ? "Jumped to setup block."
+            : $"Jumped to command {commandIndex + 1}.";
+        this.toolbarStatusColor = Color.DarkGreen;
     }
 
     private void UpdatePreviewFades(Event currentEvent, GameTime time)
@@ -2752,39 +3042,57 @@ if (this.UpdatePreviewFarmerMove(currentEvent, time))
 
         int nextX = this.xPositionOnScreen + 28 + (int)Math.Ceiling(Game1.smallFont.MeasureString(title).X) + 36;
         int buttonY = this.yPositionOnScreen + 16;
-        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 72, 38), "New", this.NewCutscene);
-        nextX += 84;
+
+        int newW = (int)Game1.smallFont.MeasureString("New").X + 24;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, newW, 38), "New", this.NewCutscene);
+        nextX += newW + 12;
 
         this.locationButtonBounds = new Rectangle(nextX, buttonY, 250, 38);
         this.DrawToolbarButton(spriteBatch, this.locationButtonBounds, "Location: " + this.TrimToolbarText(LocationBootstrapper.GetDisplayName(this.state.SelectedLocationId), 18), this.ToggleLocationDropdown);
         nextX += 262;
 
-        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 96, 38), this.state.Mode == EditorMode.Play ? "Stop" : "Play", this.TogglePlayback);
-        nextX += 108;
+        string playLabel = this.state.Mode == EditorMode.Play ? "Stop" : "Play";
+        int playW = (int)Game1.smallFont.MeasureString(playLabel).X + 24;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, playW, 38), playLabel, this.TogglePlayback);
+        nextX += playW + 12;
 
         if (this.state.Mode == EditorMode.Edit)
         {
-            this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 72, 38), ">>", this.FastTrack);
-            nextX += 84;
+            int btW = (int)Game1.smallFont.MeasureString("Back-Track").X + 24;
+            this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, btW, 38), "Back-Track", this.BackTrack);
+            nextX += btW + 12;
 
-            if (this.state.CommandMarkerIndex > -1)
-            {
-                this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 72, 38), "Reset", this.ResetMarker);
-                nextX += 84;
-            }
+            int ftW = (int)Game1.smallFont.MeasureString("Fast-Track").X + 24;
+            this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, ftW, 38), "Fast-Track", this.FastTrack);
+            nextX += ftW + 12;
+
+            int resetW = (int)Game1.smallFont.MeasureString("Reset").X + 24;
+            this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, resetW, 38), "Reset", this.ResetMarker);
+            nextX += resetW + 12;
         }
 
-        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 108, 38), "Import", this.OpenImportDialog);
-        nextX += 120;
-        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, 96, 38), "Save", this.OpenSaveDialog);
-        nextX += 108;
+        int importW = (int)Game1.smallFont.MeasureString("Import").X + 24;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, importW, 38), "Import", this.OpenImportDialog);
+        nextX += importW + 12;
 
+        int saveW = (int)Game1.smallFont.MeasureString("Save").X + 24;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(nextX, buttonY, saveW, 38), "Save", this.OpenSaveDialog);
+        nextX += saveW + 12;
+
+        // Sim toggle on the far right, before the X close button
+        string simLabel = this.simulateOnClick ? "Simulate on Click ON" : "Simulate on Click OFF";
+        int simW = (int)Game1.smallFont.MeasureString(simLabel).X + 24;
+        int simX = this.xPositionOnScreen + this.width - 56 - simW - 12;
+        this.DrawToolbarButton(spriteBatch, new Rectangle(simX, buttonY, simW, 38), simLabel, this.ToggleSimulateOnClick);
+
+        // Status message fills remaining space between Save and Sim toggle
+        int statusEndX = simX - 8;
         if (!string.IsNullOrWhiteSpace(this.toolbarStatusMessage))
         {
-            int maxWidth = (this.xPositionOnScreen + this.width) - nextX - 16;
+            int maxWidth = statusEndX - nextX - 8;
             if (maxWidth > 0)
             {
-                this.DrawWrappedText(spriteBatch, this.toolbarStatusMessage, new Vector2(nextX, this.yPositionOnScreen + 24), maxWidth, Color.DarkGreen);
+                this.DrawWrappedText(spriteBatch, this.toolbarStatusMessage, new Vector2(nextX, this.yPositionOnScreen + 24), maxWidth, this.toolbarStatusColor);
             }
         }
 

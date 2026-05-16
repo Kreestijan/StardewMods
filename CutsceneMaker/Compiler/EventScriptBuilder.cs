@@ -23,9 +23,14 @@ public static class EventScriptBuilder
             parts.Add("skippable");
         }
 
-        Dictionary<string, Point> actorPositions = initialPositions is not null
-            ? new Dictionary<string, Point>(initialPositions, StringComparer.OrdinalIgnoreCase)
-            : BuildInitialActorPositions(cutscene);
+        Dictionary<string, Point> actorPositions = BuildInitialActorPositions(cutscene);
+        if (initialPositions is not null)
+        {
+            foreach (var kvp in initialPositions)
+            {
+                actorPositions[kvp.Key] = kvp.Value;
+            }
+        }
 
         int startIndex = Math.Max(0, startCommandIndex);
         for (int i = startIndex; i < cutscene.Commands.Count; i++)
